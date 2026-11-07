@@ -1,4 +1,5 @@
 import { VirtualFS, resolvePath } from './vfs';
+import type { Console } from '../types';
 
 export interface CmdResult { out: string; code: number }
 export interface ShellContext {
@@ -49,7 +50,7 @@ export function splitPipes(line: string): string[] {
   return parts.map((p) => p.trim());
 }
 
-export class Shell {
+export class Shell implements Console {
   ctx: ShellContext;
   private commands: Record<string, Command>;
 
@@ -57,6 +58,8 @@ export class Shell {
     this.ctx = { ...ctx, history: [], sudo: false };
     this.commands = commands;
   }
+
+  get title() { return `ssh ${this.ctx.user}@${this.ctx.host}`; }
 
   get prompt() {
     const dir = this.ctx.cwd === this.ctx.home ? '~' : this.ctx.cwd.startsWith(this.ctx.home + '/') ? '~' + this.ctx.cwd.slice(this.ctx.home.length) : this.ctx.cwd;

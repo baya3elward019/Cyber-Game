@@ -35,7 +35,7 @@ describe('S1 validator', () => {
 describe('S1 full playthrough via the shell', () => {
   it('can be solved with real commands', () => {
     const s = missionS1.createSession();
-    const sh = s.shell;
+    const sh = s.console!;
     const top = sh.run(`grep "Failed password" /var/log/auth.log | grep -oE "[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+" | sort | uniq -c | sort -nr | head -n 1`).text;
     expect(top.trim()).toBe(`${ATTACK_ATTEMPTS} ${ATTACKER_IP}`);
     const acc = sh.run(`grep Accepted /var/log/auth.log | grep ${ATTACKER_IP}`).text;
@@ -52,7 +52,7 @@ describe('S1 full playthrough via the shell', () => {
 
   it('wrong submissions give feedback and do not complete objectives', () => {
     const s = missionS1.createSession();
-    s.shell.run(`submit ip ${DECOY_IP}`);
+    s.console!.run(`submit ip ${DECOY_IP}`);
     expect(s.takeFeedback()?.key).toBe('fb.s1.decoy');
     expect(s.takeFeedback()).toBeNull();
     expect(s.status().ip).toBe(false);

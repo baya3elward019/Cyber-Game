@@ -1,4 +1,4 @@
-import type { Shell } from '../terminals/linux/shell';
+import type { Console } from '../terminals/types';
 
 export type LabId = 'soc' | 'network' | 'coding' | 'cloud' | 'forensics' | 'crypto';
 
@@ -8,13 +8,25 @@ export interface Feedback {
   key: string;
 }
 
+export interface CodeTestResult { name: string; pass: boolean; detail: string }
+
+/** A code-fixing task shown in the editor. */
+export interface CodeTask {
+  filename: string;
+  language: string;
+  initial: string;
+  /** Runs the (simulated) security tests against the player's code. Never executes it. */
+  test(code: string): CodeTestResult[];
+}
+
 export interface MissionSession {
-  shell: Shell;
+  /** Terminal-style missions provide a console; code missions provide a code task. */
+  console?: Console;
+  code?: CodeTask;
   /** Objective ids in display order. */
   objectives: string[];
-  /** Which objectives are currently complete. */
   status(): Record<string, boolean>;
-  /** Feedback produced by the last command, if any (consumed by the UI). */
+  /** Feedback produced by the last action, if any (consumed by the UI). */
   takeFeedback(): Feedback | null;
   /** Lines printed when the terminal opens. */
   motd: string;
@@ -30,5 +42,4 @@ export interface MissionDef {
   parTime: number;
   createSession(): MissionSession;
 }
-// i18n keys per mission follow the convention:
-//   mission.<id>.title / .brief / .obj.<objectiveId> / .hint.<n> / .debrief.<n>
+// i18n keys per mission: mission.<id>.title / .brief / .obj.<objectiveId> / .hint.<n> / .debrief.<n>

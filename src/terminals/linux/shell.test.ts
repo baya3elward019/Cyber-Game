@@ -45,3 +45,20 @@ describe('commands', () => {
     expect(sh.complete('cd /et')).toBe('cd /etc/');
   });
 });
+
+import { sha256, rot13 } from './crypto';
+describe('crypto helpers and commands', () => {
+  it('sha256 known vectors', () => {
+    expect(sha256('abc')).toBe('ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
+    expect(sha256('')).toBe('e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855');
+  });
+  it('base64, xxd, tr round trip', () => {
+    const sh = mk();
+    expect(sh.run('echo hello | base64').text).toBe('aGVsbG8K');
+    expect(sh.run('echo aGVsbG8K | base64 -d').text).toBe('hello');
+    expect(sh.run('echo hi | xxd -p').text).toBe('68690a');
+    expect(sh.run('echo 6869 | xxd -r -p').text).toBe('hi');
+    expect(sh.run(`echo Uryyb | tr 'A-Za-z' 'N-ZA-Mn-za-m'`).text).toBe('Hello');
+    expect(rot13('NEXUS')).toBe('ARKHF');
+  });
+});

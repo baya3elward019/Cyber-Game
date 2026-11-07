@@ -4,7 +4,7 @@ import type { Quality } from '../progression/save';
 import type { LabId } from '../missions/types';
 import { Mats, LedField, serverRack, monitor, desk, chair, wallScreen, newScreen } from './equipment';
 import { concrete, floorTiles, signTexture, wallPanels } from './textures';
-import { painters, SANS, type ScreenTexture } from './screens';
+import { painters, painters2, SANS, type ScreenTexture } from './screens';
 
 export interface Interactable {
   id: string;
@@ -48,6 +48,9 @@ export class World {
   private info: WorldInfo = { name: '', rankLabel: '', xp: 0, board: [], welcome: '', rtl: false };
   private infoScreens: ScreenTexture[] = [];
   private lobbyWall: THREE.MeshStandardMaterial;
+  private pool: THREE.PointLight[] = [];
+  private zoneLights = new Map<LabId, [number, number, number, number, number][]>();
+  private zone: LabId | null = null;
   private labWall: THREE.MeshStandardMaterial;
   private trim: THREE.MeshStandardMaterial;
 
@@ -62,7 +65,10 @@ export class World {
     this.buildLobby();
     this.buildServerHall();
     this.buildSocLab();
+    this.buildOtherLabs();
     this.buildDoors();
+    for (let i = 0; i < 3; i++) { const l = new THREE.PointLight(0xffffff, 0, 10, 2); this.pool.push(l); this.root.add(l); }
+    this.setZone('soc');
     this.leds.build(this.root);
   }
 
@@ -348,7 +354,7 @@ export class World {
       this.castAll(g);
       this.root.add(g);
       this.colliders.push(new THREE.Box3(new THREE.Vector3(x - 0.42, 0, z - 0.95), new THREE.Vector3(x + 0.42, 1.3, z + 0.95)));
-      if (main) this.interactables.push({ id: 'mission:s1', object: g, actionKey: 'act.terminal' });
+      if (main) this.interactables.push({ id: 'lab:soc', object: g, actionKey: 'act.terminal' });
     }
 
     // racks along north wall (7) and south wall (6)
@@ -368,10 +374,152 @@ export class World {
     this.colliders.push(new THREE.Box3(new THREE.Vector3(-21.6, 0, -12.85), new THREE.Vector3(-16.9, 2.1, -11.8)));
     this.colliders.push(new THREE.Box3(new THREE.Vector3(-21.6, 0, -3.6), new THREE.Vector3(-17.5, 2.1, -2.5)));
 
-    this.light(-15, LAB_H - 0.3, -9.5, 0xdfe8ff, 7, 10);
-    this.light(-13, LAB_H - 0.3, -4.5, 0xdfe8ff, 6, 9);
-    this.light(-20.5, 2.4, -7.7, 0x4f8fd9, 4, 7);
+    this.zoneLights.set('soc', [[-15, LAB_H - 0.3, -9.5, 0xdfe8ff, 7], [-13, LAB_H - 0.3, -4.5, 0xdfe8ff, 6], [-20.5, 2.4, -7.7, 0x4f8fd9, 4]]);
     this.spot(-15.5, LAB_H - 0.1, -5, -16, -5, 30);
+  }
+
+
+  // ---------- other labs ----------
+
+  /** Floor, ceiling and the walls a lab owns. */
+  private labShell(x0: number, x1: number, z0: number, z1: number, walls: { north?: boolean; south?: boolean; outerX: number }, floorTint: string) {
+    const ft = floorTiles(floorTint);
+    ft.map.repeat.set((x1 - x0) / 1.2, (z1 - z0) / 1.2); ft.roughnessMap.repeat.copy(ft.map.repeat);
+    this.floor(x0, x1, z0, z1, new THREE.MeshStandardMaterial({ map: ft.map, roughnessMap: ft.roughnessMap, metalness: 0.25 }));
+    this.ceiling(x0, x1, z0, z1, LAB_H, Math.max(1, Math.round((x1 - x0) / 4.5)), Math.max(1, Math.round((z1 - z0) / 3.5)));
+    if (walls.north) this.wallX(z0, x0, x1, LAB_H, this.labWall);
+    if (walls.south) this.wallX(z1, x0, x1, LAB_H, this.labWall);
+    this.wallZ(walls.outerX, z0, z1, LAB_H, this.labWall);
+  }
+
+  /** Desk with monitors and chair. rotY turns the whole station; the user side is local +Z. */
+  private station(x: number, z: number, rotY: number, monitors: Parameters<typeof newScreen>[2][], interactId?: string, actionKey?: string, interval = 0.5) {
+    const g = new THREE.Group();
+    g.add(desk(this.mats, 1.9));
+    const n = monitors.length;
+    monitors.forEach((p, i) => {
+      const mx = (i - (n - 1) / 2) * 0.62;
+      const m = monitor(this.mats, this.screen(640, 384, p, interval), 0.58);
+      m.position.set(mx, 0.76, -0.2);
+      m.rotation.y = -mx * 0.35;
+      g.add(m);
+    });
+    const ch = chair(this.mats);
+    ch.position.set(0, 0, 0.75);
+    g.add(ch);
+    g.position.set(x, 0, z);
+    g.rotation.y = rotY;
+    this.castAll(g);
+    this.root.add(g);
+    const along = Math.abs(Math.sin(rotY)) > 0.5; // desk width runs along z
+    this.colliders.push(new THREE.Box3(new THREE.Vector3(x - (along ? 0.42 : 0.95), 0, z - (along ? 0.95 : 0.42)), new THREE.Vector3(x + (along ? 0.42 : 0.95), 1.3, z + (along ? 0.95 : 0.42))));
+    if (interactId) this.interactables.push({ id: interactId, object: g, actionKey: actionKey! });
+    return g;
+  }
+
+  /** A row of racks. Facing: rotation of each rack (0 = front faces +Z). */
+  private rackRow(x: number, z: number, count: number, dir: 'x' | 'z', rotY: number, seed = 0) {
+    for (let i = 0; i < count; i++) {
+      const r = serverRack(this.mats, this.leds, i + seed);
+      r.position.set(dir === 'x' ? x + i * 0.62 : x, 0, dir === 'z' ? z + i * 0.62 : z);
+      r.rotation.y = rotY;
+      this.root.add(r);
+      r.userData.registerLeds();
+    }
+    const len = (count - 1) * 0.62;
+    const half = Math.abs(Math.sin(rotY)) > 0.5 ? [0.5, 0.3] : [0.3, 0.5];
+    const [hx, hz] = dir === 'x' ? [half[0], half[1]] : [half[0], half[1]];
+    const minX = dir === 'x' ? x - 0.3 : x - hx, maxX = dir === 'x' ? x + len + 0.3 : x + hx;
+    const minZ = dir === 'z' ? z - 0.3 : z - hz, maxZ = dir === 'z' ? z + len + 0.3 : z + hz;
+    this.colliders.push(new THREE.Box3(new THREE.Vector3(minX, 0, minZ), new THREE.Vector3(maxX, 2.1, maxZ)));
+  }
+
+  private wallDisplay(x: number, z: number, rotY: number, w: number, h: number, painter: Parameters<typeof newScreen>[2], px = 1024, interval = 0.3) {
+    const s = wallScreen(this.mats, this.screen(px, Math.round((px * h) / w), painter, interval), w, h);
+    s.position.set(x, 2.0, z);
+    s.rotation.y = rotY;
+    this.root.add(s);
+  }
+
+  private buildOtherLabs() {
+    const W = -Math.PI / 2, E = Math.PI / 2;
+    // fill the lobby side walls beyond the lobby (z -13..-10 and 10..13)
+    this.box(-10, LAB_H / 2, 11.5, T, LAB_H, 3, this.labWall);
+    this.box(10, LAB_H / 2, -11.5, T, LAB_H, 3, this.labWall);
+    this.box(10, LAB_H / 2, 11.5, T, LAB_H, 3, this.labWall);
+
+    // NETWORK (west, z -2.4..2.6): wiring closet with racks and a console bench
+    this.labShell(-22, -10, -2.4, 2.6, { south: true, outerX: -22 }, '#323a33');
+    this.rackRow(-21.2, -1.75, 7, 'x', 0, 2);
+    const bench = this.station(-14.5, 1.75, Math.PI, [painters2.ios(), painters2.ios()], 'lab:network', 'act.network', 0.5);
+    const sw = new THREE.Mesh(new RoundedBoxGeometry(0.44, 0.045, 0.3, 2, 0.006), this.mats.rackFronts[0].mat);
+    sw.position.set(0.62, 0.785, 0.05);
+    bench.add(sw);
+    this.zoneLights.set('network', [[-14, LAB_H - 0.3, 0.2, 0xe6ffe9, 6], [-19, LAB_H - 0.3, 0.2, 0xdfe8ff, 5], [-21, 2.2, -1.2, 0x3ad07a, 2.5]]);
+
+    // CODING (west, z 2.6..13): developer floor
+    this.labShell(-22, -10, 2.6, 13, { south: true, outerX: -22 }, '#36343c');
+    this.station(-15, 5, E, [painters2.code(), painters2.code()], 'lab:coding', 'act.coding', 2);
+    this.station(-15, 8.3, E, [painters2.code(), painters.idle('CI #4812 passed')], undefined, undefined, 2);
+    this.station(-15, 11.4, E, [painters2.code()], undefined, undefined, 2);
+    this.station(-19.2, 6.6, E, [painters2.code(), painters2.code()], undefined, undefined, 2);
+    this.station(-19.2, 9.9, E, [painters.idle('code review')], undefined, undefined, 2);
+    this.wallDisplay(-21.82, 7.8, E, 3.2, 1.6, painters2.code(), 1024, 0);
+    this.zoneLights.set('coding', [[-14, LAB_H - 0.3, 6, 0xf2ecff, 7], [-19, LAB_H - 0.3, 9, 0xf2ecff, 6], [-21, 2.4, 7.8, 0x9d7cf0, 3]]);
+
+    // CLOUD (east, z -13..-2.4): data hall with two rack rows and a NOC desk
+    this.labShell(10, 22, -13, -2.4, { north: true, south: true, outerX: 22 }, '#30383f');
+    this.rackRow(15.3, -11.9, 10, 'x', 0, 4);
+    this.rackRow(15.3, -9.3, 10, 'x', Math.PI, 7);
+    this.station(13.2, -6.3, W, [painters2.cloud(), painters2.cloud(), painters.dashboard()], 'lab:cloud', 'act.cloud', 0.5);
+    this.wallDisplay(21.82, -5.2, W, 3.0, 1.6, painters2.cloud(), 1024, 0.4);
+    this.zoneLights.set('cloud', [[14, LAB_H - 0.3, -6, 0xe0f4ff, 6], [18, LAB_H - 0.3, -10.6, 0x7fc8ff, 6], [21, 2.4, -5.2, 0x3ac8d9, 3]]);
+
+    // FORENSICS (east, z -2.4..2.6): evidence lockers, board and workstation
+    this.labShell(10, 22, -2.4, 2.6, { south: true, outerX: 22 }, '#3a3631');
+    const lockerMat = new THREE.MeshStandardMaterial({ color: 0x6b7178, metalness: 0.7, roughness: 0.4, map: this.mats.steel.map });
+    for (let i = 0; i < 6; i++) for (let j = 0; j < 3; j++) {
+      const b = new THREE.Mesh(new RoundedBoxGeometry(0.58, 0.58, 0.5, 2, 0.01), lockerMat);
+      b.position.set(12.2 + i * 0.62, 0.32 + j * 0.62, -1.95);
+      this.castAll(b);
+      this.root.add(b);
+    }
+    this.colliders.push(new THREE.Box3(new THREE.Vector3(11.9, 0, -2.25), new THREE.Vector3(15.6, 2, -1.65)));
+    this.wallDisplay(21.82, 0.1, W, 3.2, 1.8, painters2.evidence(), 1024, 0);
+    this.station(17, 1.7, Math.PI, [painters2.hashes(), painters2.hashes()], 'lab:forensics', 'act.forensics', 0);
+    this.zoneLights.set('forensics', [[14, LAB_H - 0.3, 0, 0xfff1dc, 6], [19, LAB_H - 0.3, 0.5, 0xfff1dc, 6], [21, 2.6, 0.1, 0xd9a441, 2.5]]);
+
+    // CRYPTO (east, z 2.6..13): dark analysis room with a hex wall
+    this.labShell(10, 22, 2.6, 13, { south: true, outerX: 22 }, '#2c2d34');
+    this.wallDisplay(21.82, 6, W, 2.4, 1.4, painters2.hex(), 768, 0.35);
+    this.wallDisplay(21.82, 8.8, W, 2.4, 1.4, painters2.hex(), 768, 0.35);
+    this.station(17.5, 6.8, W, [painters2.hex(), painters.logs('decoder — layers'), painters2.hex()], 'lab:crypto', 'act.crypto', 0.6);
+    this.rackRow(12.5, 12.3, 4, 'x', Math.PI, 9);
+    this.zoneLights.set('crypto', [[16, LAB_H - 0.3, 6.5, 0xd8d0ff, 4], [19, LAB_H - 0.3, 10, 0xb9a6ff, 3], [21, 2.4, 7.4, 0xc792ea, 3]]);
+  }
+
+  private zoneAt(p: THREE.Vector3): LabId | null {
+    const west = p.x < -9.9, east = p.x > 9.9;
+    if (!west && !east) {
+      // in the lobby: pre-light the lab whose door is closest
+      let best: LabId | null = null, bd = 7;
+      for (const d of this.doors) { const dist = Math.hypot(p.x - d.center.x, p.z - d.center.z); if (dist < bd) { bd = dist; best = d.lab; } }
+      return best;
+    }
+    const z = p.z;
+    if (west) return z < -2.4 ? 'soc' : z < 2.6 ? 'network' : 'coding';
+    return z < -2.4 ? 'cloud' : z < 2.6 ? 'forensics' : 'crypto';
+  }
+
+  private setZone(z: LabId | null) {
+    if (!z || z === this.zone) return;
+    this.zone = z;
+    const spots = this.zoneLights.get(z) ?? [];
+    this.pool.forEach((l, i) => {
+      const s = spots[i];
+      if (!s) { l.intensity = 0; return; }
+      l.position.set(s[0], s[1], s[2]); l.color.setHex(s[3]); l.intensity = s[4]; l.distance = 11;
+    });
   }
 
   // ---------- doors ----------
@@ -407,7 +555,7 @@ export class World {
       // frame
       for (const s of [-1, 1]) this.box(x + side * 0.16, 1.32, z + s * 0.95, 0.04, 2.64, 0.1, this.trim, false);
       this.box(x + side * 0.16, 2.66, z, 0.04, 0.08, 2.0, this.trim, false);
-      const statusLight = new THREE.MeshStandardMaterial({ color: 0x000000, emissive: lab === 'soc' ? 0x3ad07a : 0xd9a441, emissiveIntensity: 2 });
+      const statusLight = new THREE.MeshStandardMaterial({ color: 0x000000, emissive: 0x3ad07a, emissiveIntensity: 2 });
       const strip = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.03, 1.6), statusLight);
       strip.position.set(x + side * 0.19, 2.56, z);
       this.root.add(strip);
@@ -428,7 +576,7 @@ export class World {
       this.root.add(sign);
       const collider = new THREE.Box3(new THREE.Vector3(x - 0.15, 0, z - 0.9), new THREE.Vector3(x + 0.15, 2.6, z + 0.9));
       this.colliders.push(collider);
-      const door: Door = { lab, unlocked: lab === 'soc', open: 0, panels, closedZ: panels.map((p) => p.position.z), collider, center: new THREE.Vector3(x, 1.3, z), statusLight };
+      const door: Door = { lab, unlocked: true, open: 0, panels, closedZ: panels.map((p) => p.position.z), collider, center: new THREE.Vector3(x, 1.3, z), statusLight };
       this.doors.push(door);
       this.interactables.push({ id: 'door:' + lab, object: panels[0], actionKey: 'door' });
       this.interactables.push({ id: 'door:' + lab, object: panels[1], actionKey: 'door' });
@@ -463,7 +611,7 @@ export class World {
     // ticker
     g.fillStyle = '#0a1016'; g.fillRect(0, h - 64, w, 64);
     g.fillStyle = '#9fb3c4'; g.font = `30px ${SANS}`; g.textAlign = 'left';
-    const msg = 'SOC status: 1 active incident on srv-web-01   •   Network, Secure Coding, Cloud, Forensics and Crypto labs open in upcoming updates   •   All scenarios are simulated   •   ';
+    const msg = 'SOC: active incident on srv-web-01   •   Network: unknown device on SW-ACCESS-01 Fa0/7   •   Cloud: bucket exposure reported   •   Forensics: case 2291 integrity check   •   All scenarios are simulated   •   ';
     const mw = g.measureText(msg).width;
     const off = (t * 90) % mw;
     g.fillText(msg + msg, -off, h - 32);
@@ -541,6 +689,7 @@ export class World {
       return this.frustum.intersectsSphere(this.sphere);
     };
     for (const s of this.screens) s.update(time, visible);
+    this.setZone(this.zoneAt(player));
     this.leds.update(time);
     let opened: string | null = null;
     for (const d of this.doors) {

@@ -2,13 +2,24 @@
 
 A first-person 3D cybersecurity training game that runs in the browser. Walk through a realistic security academy, sit at a SOC workstation, and investigate incidents with real Linux commands — all simulated and safe.
 
-**Status: v0.1 (Phase 1).** The lobby, the SOC lab and mission **S1 — Brute force investigation** are fully playable. The other five labs (Network Security, Secure Coding, Cloud Security, Digital Forensics, Cryptography & CTF) are visible but locked, labeled "opens in a future update".
+**Status: v0.2 (Phase 2).** All six labs are open, each with one fully playable mission:
+
+| Lab | Mission | What you do |
+| --- | --- | --- |
+| SOC & Incident Response | S1 — Brute force investigation | Analyze auth.log with grep/awk/sort, block the attacker, lock the account |
+| Network Security | N1 — Harden the access switch | Cisco IOS CLI: shut unused ports, port security, save config |
+| Secure Coding | C1 — Fix the SQL injection | Rewrite a vulnerable login query in a code editor, pass the security tests |
+| Cloud Security | K1 — Exposed storage bucket | Cloud CLI: find the public bucket with HR data, lock it, encrypt it, keep the website up |
+| Digital Forensics | F1 — Evidence integrity | sha256sum -c and exiftool to find tampered evidence and who changed it |
+| Cryptography & CTF | X1 — Decode the intercept | Peel off hex, Base64 and ROT13 layers with xxd, base64 and tr |
 
 ## What works
 
 - First-person movement with collision, sprint, jump and interaction.
 - Realistic procedural environment: lobby, server hall, SOC lab with racks, workstations and live dashboards.
-- Mission S1 in a simulated Linux terminal with real command behavior: pipes, `grep`, `awk`, `sort`, `uniq -c`, `sudo ufw`, `usermod`, Tab completion and history.
+- A simulated Linux terminal with real command behavior: pipes, `grep`, `awk`, `sort`, `uniq -c`, `base64`, `xxd`, `tr`, `sha256sum -c`, Tab completion and history.
+- A simulated Cisco IOS switch CLI with modes, abbreviations (`conf t`, `int range fa0/5 - 12`), real error messages and `show` commands.
+- A code editor with a security test runner (code is analyzed, never executed).
 - Hints (cost XP), specific feedback on wrong answers, a debrief explaining the lesson, XP, ranks and achievements.
 - Progress saved in the browser, with export and import as a JSON file.
 - Arabic (RTL) and English.
@@ -82,4 +93,3 @@ Create a folder under `src/missions/<lab>/<id>/` with `data.ts`, `validator.ts`,
 ## Safety
 
 All scenarios, people, companies and logs are fictional. IP addresses come from documentation-only ranges (RFC 5737) and private ranges. No real systems are contacted and no player input is ever executed as code.
-"# Cyber-Game" 

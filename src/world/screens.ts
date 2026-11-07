@@ -125,4 +125,82 @@ export const painters = {
   },
 };
 
+const CODE = [
+  ['#7f93a3', '// auth/login.js'],
+  ['#c792ea', 'async function '], ['#82aaff', 'login'], ['#d6e2ea', '(db, username, password) {'],
+  ['#d6e2ea', '  const sql = '], ['#c3e88d', '"SELECT id, role FROM users WHERE username = \'" '], ['#ff5370', '+ username +'],
+  ['#d6e2ea', '  const rows = await db.query(sql);'],
+  ['#d6e2ea', '  return rows.length === 1 ? rows[0] : null;'], ['#d6e2ea', '}'],
+];
+
+export const painters2 = {
+  ios: (): Painter => (g, w, h, t) => {
+    g.fillStyle = '#04080a'; g.fillRect(0, 0, w, h);
+    g.font = `14px ${MONO}`; g.textBaseline = 'top';
+    const lines = ['SW-ACCESS-01>enable', 'SW-ACCESS-01#show interfaces status', 'Port      Name          Status', 'Fa0/1     Reception-PC  connected', 'Fa0/2     Finance-PC    connected', 'Fa0/5     Wall-jack     notconnect', 'Fa0/6     Wall-jack     notconnect', 'Fa0/7     Wall-jack     connected', '%PORT-5-UNKNOWN: new device on Fa0/7', 'SW-ACCESS-01#'];
+    lines.forEach((l, i) => { g.fillStyle = l.includes('%') ? '#ffb86c' : l.endsWith('#') || l.includes('>') ? '#3ad07a' : '#c9d4dc'; g.fillText(l, 12, 12 + i * 20); });
+    if (Math.floor(t * 2) % 2) { g.fillStyle = '#3ad07a'; g.fillRect(12 + 13 * 8.4, 12 + 9 * 20, 8, 16); }
+  },
+  code: (): Painter => (g, w, h) => {
+    g.fillStyle = '#0b1016'; g.fillRect(0, 0, w, h);
+    g.fillStyle = '#121a22'; g.fillRect(0, 0, 40, h);
+    g.font = `14px ${MONO}`; g.textBaseline = 'top';
+    let x = 50, y = 14, ln = 1;
+    for (const [c, txt] of CODE) {
+      if (x === 50) { g.fillStyle = '#3d4b57'; g.fillText(String(ln++), 12, y); }
+      g.fillStyle = c; g.fillText(txt, x, y);
+      x += g.measureText(txt).width;
+      if (!txt.endsWith(' ') || txt.endsWith('+ ')) { x = 50; y += 22; }
+    }
+    g.fillStyle = 'rgba(255,83,112,.12)'; g.fillRect(40, 14 + 4 * 22 - 2, w, 22);
+  },
+  cloud: (): Painter => (g, w, h, t) => {
+    g.fillStyle = '#0b1117'; g.fillRect(0, 0, w, h);
+    g.fillStyle = '#16212b'; g.fillRect(0, 0, w, 28);
+    g.fillStyle = '#9fb3c4'; g.font = `600 14px ${SANS}`; g.textBaseline = 'middle'; g.fillText('NexusCloud — Storage', 12, 14);
+    const rows: [string, string, string][] = [['nexus-website-assets', 'Public', '#d9a441'], ['hr-exports-2026', 'Public', '#e8584a'], ['nexus-app-logs', 'Private', '#3ad07a']];
+    rows.forEach(([n, a, c], i) => {
+      const y = 60 + i * 44;
+      g.fillStyle = i % 2 ? '#0f171e' : '#121c24'; g.fillRect(10, y - 18, w - 20, 36);
+      g.fillStyle = '#d4dde4'; g.font = `15px ${MONO}`; g.fillText(n, 20, y);
+      g.fillStyle = c; g.font = `600 14px ${SANS}`; g.fillText(a, w - 110, y);
+    });
+    g.fillStyle = '#7f93a3'; g.font = `13px ${SANS}`; g.fillText('Requests / min', 20, h - 70);
+    g.strokeStyle = '#4fa3d9'; g.lineWidth = 2; g.beginPath();
+    for (let i = 0; i < 60; i++) { const x = 20 + (i / 59) * (w - 40), y = h - 20 - 30 * (0.5 + 0.5 * Math.sin(i * 0.4 + t)); i ? g.lineTo(x, y) : g.moveTo(x, y); }
+    g.stroke();
+  },
+  hashes: (): Painter => (g, w, h) => {
+    g.fillStyle = '#05090c'; g.fillRect(0, 0, w, h);
+    g.font = `13px ${MONO}`; g.textBaseline = 'top';
+    const l = ['examiner@forensic-ws:/evidence/case-2291$ sha256sum -c SHA256SUMS', 'IMG_0412.jpg: OK', 'contract_v3.pdf: OK', 'chat_export.txt: OK', 'invoice_7781.pdf: ????', 'usb_listing.txt: OK', '', 'Write blocker WB-3: READ-ONLY', 'Case 2291 — locker 4, bag 0091'];
+    l.forEach((x, i) => { g.fillStyle = x.includes('????') ? '#d9a441' : x.endsWith('OK') ? '#3ad07a' : '#c9d4dc'; g.fillText(x, 12, 12 + i * 20); });
+  },
+  evidence: (): Painter => (g, w, h) => {
+    g.fillStyle = '#2b2620'; g.fillRect(0, 0, w, h);
+    for (let i = 0; i < 400; i++) { g.fillStyle = `rgba(0,0,0,${Math.random() * 0.15})`; g.fillRect(Math.random() * w, Math.random() * h, 3, 3); }
+    const cards: [number, number, string, string][] = [[0.12, 0.2, 'Invoice 7781', '148,500?'], [0.42, 0.15, 'm.farouk', 'Procurement'], [0.75, 0.22, 'Orion Parts', 'Supplier'], [0.2, 0.62, 'USB 32GB', 'seized 31/10'], [0.55, 0.6, 'Dock 3 CCTV', '29/10 21:14'], [0.82, 0.65, 'Bank ****9902', 'new account']];
+    g.strokeStyle = '#c0392b'; g.lineWidth = 3;
+    const links = [[0, 1], [1, 2], [0, 5], [1, 3], [3, 4], [2, 5]];
+    for (const [a, b] of links) { g.beginPath(); g.moveTo(cards[a][0] * w + 70, cards[a][1] * h + 40); g.lineTo(cards[b][0] * w + 70, cards[b][1] * h + 40); g.stroke(); }
+    for (const [x, y, t1, t2] of cards) {
+      g.fillStyle = '#efe9dc'; g.fillRect(x * w, y * h, 140, 86);
+      g.fillStyle = '#c0392b'; g.beginPath(); g.arc(x * w + 70, y * h + 6, 6, 0, Math.PI * 2); g.fill();
+      g.fillStyle = '#222'; g.font = `600 17px ${SANS}`; g.textBaseline = 'top'; g.fillText(t1, x * w + 10, y * h + 22);
+      g.fillStyle = '#555'; g.font = `14px ${SANS}`; g.fillText(t2, x * w + 10, y * h + 50);
+    }
+  },
+  hex: (): Painter => (g, w, h, t) => {
+    g.fillStyle = '#05070a'; g.fillRect(0, 0, w, h);
+    g.font = `15px ${MONO}`; g.textBaseline = 'top';
+    const off = Math.floor(t * 3);
+    for (let r = 0; r < Math.floor(h / 22); r++) {
+      let line = '';
+      for (let c = 0; c < 24; c++) line += (((r + off) * 7919 + c * 104729) % 256).toString(16).padStart(2, '0') + ' ';
+      g.fillStyle = r % 5 === 0 ? '#c792ea' : '#5f7a8c';
+      g.fillText(line, 12, 10 + r * 22);
+    }
+  },
+};
+
 export { MONO, SANS };

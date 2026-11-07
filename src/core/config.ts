@@ -1,6 +1,6 @@
 /** Game-wide configuration. Change values here, not in code. */
 export const CONFIG = {
-  version: '0.1.0',
+  version: '0.2.0',
   /** Where "Send feedback" goes. Leave empty to hide the button.
    *  Example: 'https://github.com/USERNAME/REPOSITORY/issues/new' or a Google Form link. */
   feedbackUrl: '',

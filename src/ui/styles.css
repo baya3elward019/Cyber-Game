@@ -140,3 +140,16 @@ h3 { margin: 4px 0 0; font-size: 16px; font-weight: 600; }
   .stat-grid { grid-template-columns: 1fr 1fr; }
 }
 @media (prefers-reduced-motion: reduce) { .toast { animation: none; } * { transition: none !important; } }
+
+/* ---------- code editor ---------- */
+.editor { flex: 1; display: flex; min-height: 0; direction: ltr; background: #070b0e; }
+.gutter { margin: 0; padding: 12px 10px 12px 14px; font: 14px/1.55 var(--mono); color: #3d4b57; text-align: right; overflow: hidden; user-select: none; border-right: 1px solid #141c22; min-width: 46px; }
+textarea.code { flex: 1; resize: none; border: 0; outline: none; background: transparent; color: #d6e2ea; font: 14px/1.55 var(--mono); padding: 12px 14px; white-space: pre; overflow: auto; tab-size: 2; caret-color: var(--green); direction: ltr; text-align: left; }
+.code-actions { align-items: center; flex-wrap: wrap; font-family: var(--sans); }
+.code-actions .muted { font-size: 13px; }
+.test { display: flex; gap: 10px; align-items: flex-start; font-size: 13px; line-height: 1.45; padding: 8px 10px; background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--r); }
+.test code { font-family: var(--mono); font-size: 12px; direction: ltr; unicode-bidi: isolate; word-break: break-all; }
+.badge-t { flex: none; font: 600 11px var(--mono); padding: 2px 6px; border-radius: 3px; }
+.test.pass .badge-t { background: rgba(58,208,122,.15); color: var(--green); }
+.test.fail .badge-t { background: rgba(232,88,74,.15); color: var(--red); }
+.picker .item { align-items: center; }

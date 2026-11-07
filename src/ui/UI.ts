@@ -207,6 +207,18 @@ export class UI {
     ], onClose);
   }
 
+  showPicker(lab: string, save: SaveData, onPick: (id: string) => void, onClose: () => void) {
+    const ms = missionsInLab(lab as any);
+    this.panel(t('picker.title') + ' — ' + t('lab.' + lab), [
+      h('div', { class: 'list picker' }, ...ms.map((m) => {
+        const r = save.missions[m.id];
+        return h('div', { class: 'item' },
+          h('div', {}, h('div', {}, t(`mission.${m.id}.title`)), h('div', { class: 'muted' }, r?.completed ? t('progress.best', { xp: r.bestXp, time: r.bestTimeMs !== null ? fmtTime(r.bestTimeMs) : '—', hints: r.fewestHints ?? 0 }) : t('progress.notStarted'))),
+          h('button', { class: 'btn' + (r?.completed ? '' : ' primary'), onclick: () => onPick(m.id) }, r?.completed ? t('picker.replay') : t('picker.play')));
+      })),
+    ], onClose);
+  }
+
   showControls(onClose: () => void) {
     const k = (keys: string[], label: string) => [h('span', {}, ...keys.flatMap((x, i) => [i ? ' ' : '', h('kbd', {}, x)])), h('span', {}, label)];
     this.panel(t('controls.title'), [

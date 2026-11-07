@@ -1,6 +1,6 @@
 import type { MissionDef, Feedback } from '../../types';
 import { Shell, type Command } from '../../../terminals/linux/shell';
-import { coreCommands } from '../../../terminals/linux/commands';
+import { coreCommands, makeHelp } from '../../../terminals/linux/commands';
 import { VirtualFS } from '../../../terminals/linux/vfs';
 import { buildAuthLog, buildSyslog, NOTES_EN, PASSWD, HOST } from './data';
 import { checkBlock, checkIp, checkLock, checkUser, initialS1State, s1Status, type S1State } from './validator';
@@ -33,6 +33,7 @@ export const missionS1: MissionDef = {
 
     const commands: Record<string, Command> = {
       ...coreCommands,
+      help: makeHelp('  id, ufw, usermod, passwd\n  submit ip <address> | submit user <name>   record a finding in the ticket\n'),
       id: (args) => {
         const u = args[0] ?? 'analyst';
         const line = PASSWD.split('\n').find((l) => l.startsWith(u + ':'));
@@ -85,7 +86,7 @@ export const missionS1: MissionDef = {
     const shell = new Shell({ fs, cwd: '/home/analyst', home: '/home/analyst', user: 'analyst', host: HOST, state: state as any }, commands);
 
     return {
-      shell,
+      console: shell,
       objectives: ['ip', 'user', 'block', 'lock'],
       status: () => s1Status(state),
       takeFeedback: () => { const f = feedback; feedback = null; return f; },

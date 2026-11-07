@@ -1,5 +1,6 @@
 import type { Command, CmdResult, ShellContext } from './shell';
 import { resolvePath } from './vfs';
+import { sha256, toHex, fromHex, expandSet } from './crypto';
 
 const ok = (out: string): CmdResult => ({ out, code: 0 });
 const fail = (out: string, code = 1): CmdResult => ({ out, code });
@@ -48,12 +49,21 @@ function readInputs(cmd: string, files: string[], stdin: string | null, ctx: She
 const lines = (t: string) => t.replace(/\n$/, '').split('\n').filter((_x, _i, a) => !(a.length === 1 && a[0] === ''));
 const join = (l: string[]) => (l.length ? l.join('\n') + '\n' : '');
 
+/** Help text = core commands + mission-specific lines. */
+export function makeHelp(extra: string): Command {
+  return () => ok(
+    'Available commands:\n' +
+    '  ls, cd, pwd, cat, head, tail, grep, wc, sort, uniq, cut, awk, echo,\n' +
+    '  whoami, hostname, date, history, clear, base64, xxd, tr, sha256sum, file\n' +
+    extra +
+    'Pipes work: cmd1 | cmd2.  Use Tab to complete, Up/Down for history.\n');
+}
+
 export const coreCommands: Record<string, Command> = {
   help: () => ok(
     'Available commands:\n' +
     '  ls, cd, pwd, cat, head, tail, grep, wc, sort, uniq, cut, awk, echo,\n' +
-    '  whoami, hostname, date, history, clear, id, last, ufw, usermod, passwd\n' +
-    '  submit <ip|user> <value>   submit a finding to the incident ticket\n' +
+    '  whoami, hostname, date, history, clear, base64, xxd, tr, sha256sum, file\n' +
     'Pipes work: cmd1 | cmd2.  Use Tab to complete, Up/Down for history.\n'),
 
   pwd: (_a, _s, ctx) => ok(ctx.cwd + '\n'),
@@ -200,6 +210,83 @@ export const coreCommands: Record<string, Command> = {
       }).join(' ');
     });
     return ok(join(out) + err);
+  },
+  base64: (args, stdin, ctx) => {
+    const { flags, pos } = parseFlags(args);
+    const { text, err } = readInputs('base64', pos, stdin, ctx);
+    if (flags.has('d')) {
+      try { return ok(atob(text.replace(/\s+/g, '')) + err); } catch { return fail('base64: invalid input\n'); }
+    }
+    try { return ok(btoa(text).replace(/(.{76})/g, '$1\n') + '\n' + err); } catch { return fail('base64: input contains non-ASCII characters\n'); }
+  },
+
+  xxd: (args, stdin, ctx) => {
+    const { flags, pos } = parseFlags(args);
+    const { text, err } = readInputs('xxd', pos, stdin, ctx);
+    if (flags.has('r') && flags.has('p')) return ok(fromHex(text) + err);
+    if (flags.has('r')) return fail('xxd: this terminal supports -r together with -p (plain hex)\n');
+    if (flags.has('p')) return ok(toHex(text).replace(/(.{60})/g, '$1\n') + '\n' + err);
+    const rows: string[] = [];
+    for (let i = 0; i < text.length; i += 16) {
+      const chunk = text.slice(i, i + 16);
+      const hex = toHex(chunk).replace(/(.{4})/g, '$1 ').padEnd(40);
+      rows.push(`${i.toString(16).padStart(8, '0')}: ${hex} ${chunk.replace(/[^\x20-\x7e]/g, '.')}`);
+    }
+    return ok(join(rows) + err);
+  },
+
+  tr: (args, stdin) => {
+    const { flags, pos } = parseFlags(args);
+    const input = stdin ?? '';
+    if (flags.has('d')) { const del = new Set(expandSet(pos[0] ?? '')); return ok([...input].filter((c) => !del.has(c)).join('')); }
+    if (pos.length < 2) return fail("tr: missing operand\nUsage: tr 'SET1' 'SET2'   or   tr -d 'SET'\n");
+    const a = expandSet(pos[0]), b = expandSet(pos[1]);
+    const map = new Map<string, string>();
+    a.forEach((c, i) => map.set(c, b[Math.min(i, b.length - 1)]));
+    return ok([...input].map((c) => map.get(c) ?? c).join(''));
+  },
+
+  sha256sum: (args, stdin, ctx) => {
+    const { flags, pos } = parseFlags(args);
+    if (flags.has('c')) {
+      const { text, err } = readInputs('sha256sum', pos, stdin, ctx);
+      let out = ''; let failed = 0;
+      for (const line of lines(text)) {
+        const m = line.match(/^([0-9a-f]{64})\s+\*?(.+)$/);
+        if (!m) continue;
+        const f = ctx.fs.get(resolvePath(ctx.cwd, m[2], ctx.home));
+        if (!f) { out += `${m[2]}: FAILED open or read\n`; failed++; continue; }
+        const good = sha256(f.content) === m[1];
+        if (!good) failed++;
+        out += `${m[2]}: ${good ? 'OK' : 'FAILED'}\n`;
+      }
+      if (failed) out += `sha256sum: WARNING: ${failed} computed checksum${failed > 1 ? 's' : ''} did NOT match\n`;
+      return { out: out + err, code: failed ? 1 : 0 };
+    }
+    if (!pos.length) return ok(`${sha256(stdin ?? '')}  -\n`);
+    let out = '';
+    for (const f of pos) {
+      const p = resolvePath(ctx.cwd, f, ctx.home);
+      const file = ctx.fs.get(p);
+      if (ctx.fs.isDir(p)) out += `sha256sum: ${f}: Is a directory\n`;
+      else if (!file) out += `sha256sum: ${f}: No such file or directory\n`;
+      else out += `${sha256(file.content)}  ${f}\n`;
+    }
+    return ok(out);
+  },
+
+  file: (args, _s, ctx) => {
+    let out = '';
+    for (const f of args) {
+      const p = resolvePath(ctx.cwd, f, ctx.home);
+      const file = ctx.fs.get(p);
+      if (ctx.fs.isDir(p)) { out += `${f}: directory\n`; continue; }
+      if (!file) { out += `${f}: cannot open \`${f}' (No such file or directory)\n`; continue; }
+      const c = file.content;
+      const type = /\.pdf$/.test(f) ? 'PDF document, version 1.7' : /\.jpe?g$/.test(f) ? 'JPEG image data, JFIF standard 1.01' : /^[0-9a-fA-F\s]+$/.test(c) ? 'ASCII text (hex digits only)' : /^[A-Za-z0-9+/=\s]+$/.test(c) ? 'ASCII text' : 'ASCII text';
+      out += `${f}: ${type}\n`;
+    }
+    return ok(out);
   },
 };
 

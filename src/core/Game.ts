@@ -10,6 +10,7 @@ import { CONFIG } from './config';
 import { loadSave, writeSave, exportSave, importSave, type SaveData, type Lang, type Quality, type Settings } from '../progression/save';
 import { computeXp, recordCompletion, rankFor, totalXp, evaluateAchievements } from '../progression/progress';
 import { missionById, missionsInLab, MISSIONS } from '../missions/registry';
+import type { LabId } from '../missions/types';
 
 type State = 'menu' | 'playing' | 'paused' | 'mission';
 
@@ -203,8 +204,12 @@ export class Game {
   }
 
   private updateObjective(big = false) {
-    const nextMission = MISSIONS.find((m) => !this.save.missions[m.id]?.completed);
-    this.ui.setObjective(nextMission ? t('objective.goSoc') : t('objective.allDone'), big);
+    const done = (id: string) => this.save.missions[id]?.completed;
+    const next = MISSIONS.find((m) => !done(m.id));
+    const text = !MISSIONS.some((m) => done(m.id)) ? t('objective.goSoc')
+      : next ? t('objective.next', { mission: t(`mission.${next.id}.title`), lab: t('lab.' + next.lab) })
+      : t('objective.allDone');
+    this.ui.setObjective(text, big);
   }
 
   private refreshWorldInfo() {
@@ -282,17 +287,31 @@ export class Game {
     if (!it) return;
     if (it.id.startsWith('door:')) { this.sfx.denied(); return; }
     this.sfx.ui();
-    if (it.id.startsWith('mission:')) { this.openMission(it.id.slice(8)); return; }
+    if (it.id.startsWith('lab:')) { this.openLab(it.id.slice(4) as LabId); return; }
     document.exitPointerLock();
     this.state = 'paused';
     this.player.enabled = false;
     const back = () => this.enterGame();
     if (it.id === 'reception') {
-      this.view(() => this.ui.showInfo(t('app.title'), [t('reception.welcome', { name: this.save.nickname }), t('objective.goSoc')], back));
+      this.view(() => this.ui.showInfo(t('app.title'), [t('reception.welcome', { name: this.save.nickname }), this.objectiveText()], back));
     } else this.showProgress(back);
   }
 
   // ---------- missions ----------
+
+  private objectiveText() {
+    const next = MISSIONS.find((m) => !this.save.missions[m.id]?.completed);
+    return next ? t('objective.next', { mission: t(`mission.${next.id}.title`), lab: t('lab.' + next.lab) }) : t('objective.allDone');
+  }
+
+  private openLab(lab: LabId) {
+    const ms = missionsInLab(lab);
+    if (ms.length === 1) { this.openMission(ms[0].id); return; }
+    document.exitPointerLock();
+    this.state = 'paused';
+    this.player.enabled = false;
+    this.view(() => this.ui.showPicker(lab, this.save, (id) => this.openMission(id), () => this.enterGame()));
+  }
 
   private openMission(id: string) {
     const def = missionById(id);
@@ -333,7 +352,7 @@ export class Game {
     const prevRank = rankFor(totalXp(this.save)).id;
     const xp = computeXp(def.baseXp, hints, timeMs, def.parTime);
     const labIds = missionsInLab(def.lab).map((m) => m.id);
-    const res = recordCompletion(this.save, def.id, xp, timeMs, hints, labIds);
+    const res = recordCompletion(this.save, def.id, xp, timeMs, hints, labIds, CONFIG.labs.map((l) => missionsInLab(l).map((m) => m.id)));
     this.persist();
     this.sfx.complete();
     const newRank = rankFor(totalXp(this.save)).id;

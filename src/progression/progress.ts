@@ -38,7 +38,7 @@ export function computeXp(baseXp: number, hintsUsed: number, timeMs: number, par
 export interface CompletionResult { xp: XpBreakdown; gained: number; newBest: boolean; newAchievements: string[] }
 
 /** Records a mission completion into the save (mutates it). Replays only add XP if they beat the best score. */
-export function recordCompletion(save: SaveData, missionId: string, xp: XpBreakdown, timeMs: number, hintsUsed: number, labMissionIds: string[]): CompletionResult {
+export function recordCompletion(save: SaveData, missionId: string, xp: XpBreakdown, timeMs: number, hintsUsed: number, labMissionIds: string[], allLabs: string[][] = []): CompletionResult {
   const prev = save.missions[missionId] ?? { completed: false, bestXp: 0, bestTimeMs: null, fewestHints: null, attempts: 0 };
   const gained = Math.max(0, xp.total - prev.bestXp);
   save.missions[missionId] = {
@@ -48,13 +48,13 @@ export function recordCompletion(save: SaveData, missionId: string, xp: XpBreakd
     fewestHints: prev.fewestHints === null ? hintsUsed : Math.min(prev.fewestHints, hintsUsed),
     attempts: prev.attempts,
   };
-  const newAchievements = evaluateAchievements(save, { missionId, hintsUsed, timeMs, labMissionIds });
+  const newAchievements = evaluateAchievements(save, { missionId, hintsUsed, timeMs, labMissionIds, allLabs });
   return { xp, gained, newBest: gained > 0, newAchievements };
 }
 
-export const ACHIEVEMENTS = ['first_mission', 'no_hints', 'speedrunner', 'cli_native', 'lab_soc'] as const;
+export const ACHIEVEMENTS = ['first_mission', 'no_hints', 'speedrunner', 'cli_native', 'lab_soc', 'all_labs'] as const;
 
-export function evaluateAchievements(save: SaveData, ctx?: { missionId: string; hintsUsed: number; timeMs: number; labMissionIds: string[] }): string[] {
+export function evaluateAchievements(save: SaveData, ctx?: { missionId: string; hintsUsed: number; timeMs: number; labMissionIds: string[]; allLabs?: string[][] }): string[] {
   const earned: string[] = [];
   const give = (id: string) => { if (!save.achievements.includes(id)) { save.achievements.push(id); earned.push(id); } };
   if (Object.values(save.missions).some((m) => m.completed)) give('first_mission');
@@ -63,6 +63,7 @@ export function evaluateAchievements(save: SaveData, ctx?: { missionId: string; 
     if (ctx.hintsUsed === 0) give('no_hints');
     if (ctx.timeMs < 180_000) give('speedrunner');
     if (ctx.missionId.startsWith('s') && ctx.labMissionIds.every((id) => save.missions[id]?.completed)) give('lab_soc');
+    if (ctx.allLabs?.length === 6 && ctx.allLabs.every((ids) => ids.some((id) => save.missions[id]?.completed))) give('all_labs');
   }
   return earned;
 }
