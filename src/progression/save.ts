@@ -27,6 +27,7 @@ export interface SaveData {
   missions: Record<string, MissionRecord>;
   achievements: string[];
   stats: { commands: number; hintsUsed: number; playTimeMs: number };
+  escape: { completed: boolean; bestTimeMs: number | null; runs: number };
   settings: Settings;
 }
 
@@ -38,7 +39,7 @@ export const defaultSettings = (): Settings => ({
 
 export const newSave = (): SaveData => ({
   version: 1, nickname: '', lang: 'en', missions: {}, achievements: [],
-  stats: { commands: 0, hintsUsed: 0, playTimeMs: 0 }, settings: defaultSettings(),
+  stats: { commands: 0, hintsUsed: 0, playTimeMs: 0 }, escape: { completed: false, bestTimeMs: null, runs: 0 }, settings: defaultSettings(),
 });
 
 const num = (v: unknown, lo: number, hi: number, d: number) => (typeof v === 'number' && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : d);
@@ -75,6 +76,11 @@ export function validateSave(raw: unknown): SaveData | null {
       commands: num(r.stats?.commands, 0, 1e9, 0),
       hintsUsed: num(r.stats?.hintsUsed, 0, 1e9, 0),
       playTimeMs: num(r.stats?.playTimeMs, 0, 1e12, 0),
+    },
+    escape: {
+      completed: bool(r.escape?.completed, false),
+      bestTimeMs: typeof r.escape?.bestTimeMs === 'number' ? num(r.escape.bestTimeMs, 0, 1e9, 0) : null,
+      runs: num(r.escape?.runs, 0, 1e6, 0),
     },
     settings: {
       quality: ['low', 'medium', 'high', 'ultra'].includes(s.quality) ? s.quality : d.quality,

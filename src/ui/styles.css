@@ -153,3 +153,13 @@ textarea.code { flex: 1; resize: none; border: 0; outline: none; background: tra
 .test.pass .badge-t { background: rgba(58,208,122,.15); color: var(--green); }
 .test.fail .badge-t { background: rgba(232,88,74,.15); color: var(--red); }
 .picker .item { align-items: center; }
+
+/* ---------- escape room ---------- */
+.mono-block { font: 14px/1.5 var(--mono); background: #070b0e; border: 1px solid var(--line); border-radius: var(--r); padding: 12px 14px; margin: 0; white-space: pre-wrap; direction: ltr; text-align: left; overflow-x: auto; }
+.kp-display { font: 600 30px var(--mono); text-align: center; letter-spacing: .2em; padding: 14px; background: #04080b; border: 1px solid var(--line); border-radius: var(--r); color: #7fc8ff; direction: ltr; }
+.kp-display.ok { color: var(--green); letter-spacing: .05em; font-size: 22px; }
+.kp-display.bad { color: var(--red); letter-spacing: .05em; font-size: 22px; }
+.keypad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; max-width: 320px; margin: 0 auto; width: 100%; direction: ltr; }
+.kp-key { font: 600 22px var(--mono); padding: 16px 0; background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--r); cursor: pointer; }
+.kp-key:hover { border-color: var(--blue); }
+.kp-key.enter { background: var(--blue); color: #061019; font-size: 15px; font-family: var(--sans); }

@@ -13,11 +13,12 @@ export interface Interactable {
 }
 
 export interface Door {
-  lab: LabId;
+  id: string;
+  axis: 'x' | 'z';
   unlocked: boolean;
   open: number; // 0..1
   panels: THREE.Mesh[];
-  closedZ: number[];
+  closedPos: number[];
   collider: THREE.Box3;
   center: THREE.Vector3;
   statusLight: THREE.MeshStandardMaterial;
@@ -49,8 +50,8 @@ export class World {
   private infoScreens: ScreenTexture[] = [];
   private lobbyWall: THREE.MeshStandardMaterial;
   private pool: THREE.PointLight[] = [];
-  private zoneLights = new Map<LabId, [number, number, number, number, number][]>();
-  private zone: LabId | null = null;
+  private zoneLights = new Map<string, [number, number, number, number, number][]>();
+  private zone: string | null = null;
   private labWall: THREE.MeshStandardMaterial;
   private trim: THREE.MeshStandardMaterial;
 
@@ -66,6 +67,7 @@ export class World {
     this.buildServerHall();
     this.buildSocLab();
     this.buildOtherLabs();
+    this.buildEscape();
     this.buildDoors();
     for (let i = 0; i < 3; i++) { const l = new THREE.PointLight(0xffffff, 0, 10, 2); this.pool.push(l); this.root.add(l); }
     this.setZone('soc');
@@ -175,7 +177,7 @@ export class World {
     this.wallZ(-10, -10, 10, LOBBY_H, this.lobbyWall, [-5, 0, 5]);
     this.wallZ(10, -10, 10, LOBBY_H, this.lobbyWall, [-5, 0, 5]);
     // south wall: solid ends + glass into the server hall
-    this.box(-8, LOBBY_H / 2, 10, 4, LOBBY_H, T, this.lobbyWall);
+    this.wallX(10, -10, -6, LOBBY_H, this.lobbyWall, [-8]);
     this.box(8, LOBBY_H / 2, 10, 4, LOBBY_H, T, this.lobbyWall);
     const glass = new THREE.Mesh(new THREE.PlaneGeometry(12, LOBBY_H), this.mats.glass);
     glass.position.set(0, LOBBY_H / 2, 10);
@@ -498,12 +500,17 @@ export class World {
     this.zoneLights.set('crypto', [[16, LAB_H - 0.3, 6.5, 0xd8d0ff, 4], [19, LAB_H - 0.3, 10, 0xb9a6ff, 3], [21, 2.4, 7.4, 0xc792ea, 3]]);
   }
 
-  private zoneAt(p: THREE.Vector3): LabId | null {
+  private zoneAt(p: THREE.Vector3): string | null {
+    if (p.z > 10.1 && p.x < -2 && p.x > -12.2) return p.z < 20 ? 'esc1' : p.z < 26 ? 'esc2' : 'esc3';
     const west = p.x < -9.9, east = p.x > 9.9;
     if (!west && !east) {
-      // in the lobby: pre-light the lab whose door is closest
-      let best: LabId | null = null, bd = 7;
-      for (const d of this.doors) { const dist = Math.hypot(p.x - d.center.x, p.z - d.center.z); if (dist < bd) { bd = dist; best = d.lab; } }
+      // in the lobby: pre-light the area whose door is closest
+      let best: string | null = null, bd = 7;
+      for (const d of this.doors) {
+        if (d.id.startsWith('esc-') && d.id !== 'esc-a') continue;
+        const dist = Math.hypot(p.x - d.center.x, p.z - d.center.z);
+        if (dist < bd) { bd = dist; best = d.id === 'esc-a' ? 'esc1' : d.id; }
+      }
       return best;
     }
     const z = p.z;
@@ -511,7 +518,7 @@ export class World {
     return z < -2.4 ? 'cloud' : z < 2.6 ? 'forensics' : 'crypto';
   }
 
-  private setZone(z: LabId | null) {
+  private setZone(z: string | null) {
     if (!z || z === this.zone) return;
     this.zone = z;
     const spots = this.zoneLights.get(z) ?? [];
@@ -522,7 +529,232 @@ export class World {
     });
   }
 
+
+  // ---------- escape room ----------
+
+  private breakers = new Map<string, THREE.MeshStandardMaterial>();
+  private breakerLevers = new Map<string, THREE.Mesh>();
+
+  private infoPlane(x: number, y: number, z: number, rotY: number, w: number, h: number, painter: Parameters<typeof newScreen>[2], id: string, actionKey: string, px = 512, emissive = 0.6) {
+    const s = newScreen(px, Math.round((px * h) / w), painter, 0);
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshStandardMaterial({ map: s.texture, emissive: 0xffffff, emissiveMap: s.texture, emissiveIntensity: emissive, roughness: 0.7 }));
+    m.position.set(x, y, z);
+    m.rotation.y = rotY;
+    this.root.add(m);
+    this.interactables.push({ id, object: m, actionKey });
+    return m;
+  }
+
+  private intercom(x: number, z: number, rotY: number, n: number) {
+    const g = new THREE.Group();
+    const body = new THREE.Mesh(new RoundedBoxGeometry(0.22, 0.32, 0.06, 2, 0.02), this.mats.darkMetal);
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.06, 0.012, 8, 24), new THREE.MeshStandardMaterial({ color: 0x000000, emissive: 0xe8584a, emissiveIntensity: 2.5 }));
+    ring.position.set(0, 0.05, 0.035);
+    const grille = new THREE.Mesh(new THREE.CircleGeometry(0.05, 20), this.mats.blackPlastic);
+    grille.position.set(0, 0.05, 0.032);
+    g.add(body, ring, grille);
+    g.position.set(x, 1.55, z);
+    g.rotation.y = rotY;
+    this.root.add(g);
+    this.interactables.push({ id: 'esc:warden:' + n, object: g, actionKey: 'act.esc.warden' });
+  }
+
+  private buildEscape() {
+    const E = Math.PI / 2, W = -Math.PI / 2;
+    const H = LAB_H;
+    const wall = this.labWall;
+    const fl = (x0: number, x1: number, z0: number, z1: number, tint: string) => {
+      const ft = floorTiles(tint);
+      ft.map.repeat.set((x1 - x0) / 1.2, (z1 - z0) / 1.2); ft.roughnessMap.repeat.copy(ft.map.repeat);
+      this.floor(x0, x1, z0, z1, new THREE.MeshStandardMaterial({ map: ft.map, roughnessMap: ft.roughnessMap, metalness: 0.25 }));
+    };
+    // entrance door in the lobby's south wall
+    this.makeDoor('esc-a', -8, 10, 'x', -1, true, ['Escape Room', 'غرفة الهروب'], 0xd9a441);
+    // corridor
+    fl(-9.8, -6.2, 10, 14.6, '#2a2c30');
+    this.ceiling(-9.8, -6.2, 10, 14.6, H, 1, 2);
+    this.wallZ(-9.8, 10, 14.6, H, wall);
+    this.wallZ(-6.2, 10, 14.6, H, wall);
+    // rooms share outer walls x=-12 and x=-2
+    fl(-12, -2, 14.6, 32, '#2f3236');
+    this.ceiling(-12, -2, 14.6, 32, H, 2, 4);
+    this.wallZ(-12, 14.6, 32, H, wall);
+    this.wallZ(-2, 14.6, 32, H, wall);
+    this.wallX(14.6, -12, -2, H, wall, [-8], 3.6, 2.8);
+    this.wallX(20, -12, -2, H, wall, [-7]);
+    this.wallX(26, -12, -2, H, wall, [-4]);
+    this.wallX(32, -12, -2, H, wall, [-7]);
+    this.makeDoor('esc-b', -7, 20, 'x', -1, false, null);
+    this.makeDoor('esc-c', -4, 26, 'x', -1, false, null);
+    this.makeDoor('esc-d', -7, 32, 'x', -1, false, null);
+    // exit room
+    fl(-9, -5, 32, 35.5, '#5a5f63');
+    this.ceiling(-9, -5, 32, 35.5, H, 1, 2);
+    this.wallZ(-9, 32, 35.5, H, wall);
+    this.wallZ(-5, 32, 35.5, H, wall);
+    this.wallX(35.5, -9, -5, H, wall);
+    const exitSign = this.screen(1024, 400, (g, w, h) => {
+      g.fillStyle = '#0d3b22'; g.fillRect(0, 0, w, h);
+      g.fillStyle = '#7dffb0'; g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.font = `600 120px ${SANS}`; g.fillText('EXIT', w / 2, h * 0.38);
+      g.font = `500 64px ${SANS}`; (g as any).direction = 'rtl'; g.fillText('خروج', w / 2, h * 0.75); (g as any).direction = 'ltr';
+    }, 0);
+    const es = wallScreen(this.mats, exitSign, 2.2, 0.86);
+    es.position.set(-7, 2.3, 35.32); es.rotation.y = Math.PI;
+    this.root.add(es);
+
+    // ROOM 1 — intake: desk with sticky note, scan printout, whiteboard, keypad
+    const desk1 = this.station(-4.5, 19.25, Math.PI, [painters.idle('LOCKED')], 'esc:note', 'act.esc.note', 0);
+    const note = new THREE.Mesh(new THREE.PlaneGeometry(0.09, 0.09), new THREE.MeshStandardMaterial({ color: 0xf5e663, emissive: 0x3a3510, roughness: 0.9 }));
+    note.position.set(0.24, 1.0, -0.17); desk1.add(note);
+    this.infoPlane(-11.84, 1.7, 17.3, E, 1.0, 1.3, (g, w, h) => {
+      g.fillStyle = '#f2f0e8'; g.fillRect(0, 0, w, h);
+      g.fillStyle = '#222'; g.font = `600 30px ${SANS}`; g.fillText('NETWORK SCAN — VAULT-GW', 30, 60);
+      g.font = `22px "JetBrains Mono", monospace`;
+      ['PORT      STATE  SERVICE', '22/tcp    open   ssh', '80/tcp    open   http', '3389/tcp  open   ms-wbt-server'].forEach((l, i) => g.fillText(l, 30, 140 + i * 50));
+      g.strokeStyle = '#c0392b'; g.lineWidth = 4; g.strokeRect(22, 270, w - 44, 46);
+    }, 'esc:poster', 'act.esc.poster', 512, 0.25);
+    this.infoPlane(-2.16, 1.7, 17, W, 2.2, 1.2, (g, w, h) => {
+      g.fillStyle = '#f7f7f4'; g.fillRect(0, 0, w, h);
+      g.fillStyle = '#1f4fa0'; g.font = `600 44px ${SANS}`; g.fillText('PATCHING THIS WEEK', 40, 70);
+      g.font = `40px ${SANS}`;
+      g.fillStyle = '#1d7a3a'; g.fillText('✔ SSH', 60, 150); g.fillText('✔ Web server (nginx)', 60, 215);
+      g.fillStyle = '#b3261e'; g.fillText('✘ Remote Desktop — postponed', 60, 280);
+    }, 'esc:board', 'act.esc.board', 1024, 0.2);
+    const keypad = new THREE.Group();
+    keypad.add(new THREE.Mesh(new RoundedBoxGeometry(0.18, 0.26, 0.04, 2, 0.01), this.mats.darkMetal));
+    const kscreen = new THREE.Mesh(new THREE.PlaneGeometry(0.13, 0.05), new THREE.MeshStandardMaterial({ color: 0, emissive: 0x3aa0ff, emissiveIntensity: 1.5 }));
+    kscreen.position.set(0, 0.08, 0.021); keypad.add(kscreen);
+    for (let r = 0; r < 4; r++) for (let c = 0; c < 3; c++) {
+      const k = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.03, 0.01), this.mats.steel);
+      k.position.set(-0.045 + c * 0.045, 0.02 - r * 0.04, 0.022); keypad.add(k);
+    }
+    keypad.position.set(-8.4, 1.35, 19.83); keypad.rotation.y = Math.PI;
+    this.root.add(keypad);
+    this.interactables.push({ id: 'esc:keypad', object: keypad, actionKey: 'act.esc.keypad' });
+    this.intercom(-11.84, 19.0, E, 1);
+
+    // ROOM 2 — server vault: racks, rack label, terminal
+    this.rackRow(-11.2, 20.9, 5, 'z', E, 11);
+    this.rackRow(-2.8, 20.9, 5, 'z', W, 13);
+    this.infoPlane(-10.68, 1.45, 22.15, E, 0.36, 0.24, (g, w, h) => {
+      g.fillStyle = '#fafafa'; g.fillRect(0, 0, w, h);
+      g.fillStyle = '#111'; g.font = `600 40px ${SANS}`; g.fillText('READ ME', 20, 60);
+      g.font = `28px ${SANS}`; g.fillText('hidden . files', 20, 120); g.fillText('— the admin', 20, 170);
+    }, 'esc:label', 'act.esc.label', 512, 0.4);
+    this.station(-8.5, 25.3, Math.PI, [painters.logs('vault — guest@vault')], 'esc:terminal', 'act.esc.terminal', 0.5);
+    this.intercom(-11.84, 25.1, E, 2);
+
+    // ROOM 3 — core: breakers, crash screens, plaque
+    const ids = ['A', 'B', 'C'];
+    ids.forEach((id, i) => {
+      const g = new THREE.Group();
+      g.add(new THREE.Mesh(new RoundedBoxGeometry(0.42, 0.6, 0.14, 2, 0.02), new THREE.MeshStandardMaterial({ color: 0x8a9097, metalness: 0.6, roughness: 0.5 })));
+      const lever = new THREE.Mesh(new RoundedBoxGeometry(0.06, 0.2, 0.06, 2, 0.01), new THREE.MeshStandardMaterial({ color: 0xc0392b, roughness: 0.5 }));
+      lever.position.set(0, -0.06, 0.09); lever.rotation.x = 0.6; g.add(lever);
+      const light = new THREE.MeshStandardMaterial({ color: 0, emissive: 0xe8584a, emissiveIntensity: 2 });
+      const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.025, 12, 8), light); bulb.position.set(0.13, 0.2, 0.075); g.add(bulb);
+      const lbl = new THREE.Mesh(new THREE.PlaneGeometry(0.3, 0.1), new THREE.MeshStandardMaterial({ map: signTexture([{ text: 'RACK-' + id, font: `600 120px ${SANS}`, color: '#111' }], 512, 170, '#f2f0e8') }));
+      lbl.position.set(0, 0.36, 0.0); g.add(lbl);
+      g.position.set(-11.88, 1.3, 27.6 + i * 1.4); g.rotation.y = E;
+      this.root.add(g);
+      this.breakers.set(id, light); this.breakerLevers.set(id, lever);
+      this.interactables.push({ id: 'esc:breaker:' + id, object: g, actionKey: 'act.esc.breaker' });
+    });
+    [['RACK-A', '03:07:44'], ['RACK-B', '03:12:09'], ['RACK-C', '03:01:52']].forEach(([name, time], i) => {
+      const scr = this.screen(640, 360, (g, w, h, t) => {
+        g.fillStyle = '#12060a'; g.fillRect(0, 0, w, h);
+        g.fillStyle = Math.floor(t * 1.5) % 2 ? '#ff5a4a' : '#a8322a'; g.fillRect(0, 0, w, 44);
+        g.fillStyle = '#fff'; g.font = `600 26px ${SANS}`; g.textBaseline = 'middle'; g.fillText(`${name} — POWER LOST`, 16, 22);
+        g.fillStyle = '#ffb4a8'; g.font = `24px "JetBrains Mono", monospace`;
+        g.fillText(`kernel: PSU failure`, 16, 110); g.fillText(`time:   ${time}`, 16, 160); g.fillText(`status: OFFLINE`, 16, 210);
+      }, 0.6);
+      const ws = wallScreen(this.mats, scr, 1.1, 0.62);
+      ws.position.set(-2.18, 2.1, 27.6 + i * 1.4); ws.rotation.y = W;
+      this.root.add(ws);
+      this.interactables.push({ id: 'esc:crash', object: ws, actionKey: 'act.esc.crash' });
+    });
+    this.infoPlane(-10, 1.5, 31.84, Math.PI, 0.9, 0.36, (g, w, h) => {
+      const grd = g.createLinearGradient(0, 0, w, h); grd.addColorStop(0, '#b08d57'); grd.addColorStop(1, '#7a5f35');
+      g.fillStyle = grd; g.fillRect(0, 0, w, h);
+      g.fillStyle = '#2b1f0e'; g.font = `italic 600 30px Georgia, serif`; g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.fillText('“Bring them back in the order they fell.”', w / 2, h / 2);
+    }, 'esc:plaque', 'act.esc.plaque', 1024, 0.15);
+    this.intercom(-2.16, 31.2, W, 3);
+
+    this.zoneLights.set('esc1', [[-8, H - 0.3, 12.5, 0xff6a5a, 3], [-7, H - 0.3, 17.3, 0xffe2dc, 6], [-11, 2.2, 17.3, 0xff3b2f, 2]]);
+    this.zoneLights.set('esc2', [[-7, H - 0.3, 23, 0xcfe0ff, 6], [-8.5, 2.6, 25, 0x4f8fd9, 3], [-3, 2.4, 22, 0x4f8fd9, 2.5]]);
+    this.zoneLights.set('esc3', [[-7, H - 0.3, 29, 0xffd9a8, 5], [-11, 2.2, 29, 0xd9a441, 2.5], [-7, H - 0.3, 33.8, 0xe8fff0, 7]]);
+  }
+
+  setBreaker(id: string, on: boolean) {
+    this.breakers.get(id)?.emissive.setHex(on ? 0x3ad07a : 0xe8584a);
+    const l = this.breakerLevers.get(id);
+    if (l) l.rotation.x = on ? -0.6 : 0.6;
+  }
+
+  resetEscape() {
+    for (const id of ['esc-b', 'esc-c', 'esc-d']) this.setDoorUnlocked(id, false);
+    this.setDoorUnlocked('esc-a', true);
+    for (const id of ['A', 'B', 'C']) this.setBreaker(id, false);
+  }
+
   // ---------- doors ----------
+
+  private panelMat = new THREE.MeshStandardMaterial({ color: 0x9aa3ab, metalness: 0.85, roughness: 0.3 });
+
+  /** Sliding double door in a wall that runs along `axis`. `side` points to the front (where the sign goes). */
+  private makeDoor(id: string, x: number, z: number, axis: 'x' | 'z', side: 1 | -1, unlocked: boolean, sign: [string, string] | null, accent = 0x3ad07a) {
+    this.panelMat.map = this.mats.steel.map;
+    const panels: THREE.Mesh[] = [];
+    for (const s of [-1, 1]) {
+      const geo = axis === 'z' ? new RoundedBoxGeometry(0.06, 2.58, 0.9, 2, 0.01) : new RoundedBoxGeometry(0.9, 2.58, 0.06, 2, 0.01);
+      const p = new THREE.Mesh(geo, this.panelMat);
+      if (axis === 'z') p.position.set(x, 1.29, z + s * 0.45); else p.position.set(x + s * 0.45, 1.29, z);
+      this.castAll(p);
+      this.root.add(p);
+      panels.push(p);
+      const win = new THREE.Mesh(new THREE.PlaneGeometry(0.12, 1.2), this.mats.glass);
+      if (axis === 'z') { win.position.set(side * 0.035, 0.25, -s * 0.25); win.rotation.y = side * Math.PI / 2; }
+      else { win.position.set(-s * 0.25, 0.25, side * 0.035); win.rotation.y = side > 0 ? 0 : Math.PI; }
+      p.add(win);
+    }
+    const fx = (dx: number, dz: number) => axis === 'z' ? [x + dx, z + dz] : [x + dz, z + dx];
+    for (const s of [-1, 1]) { const [px, pz] = fx(side * 0.16, s * 0.95); this.box(px, 1.32, pz, axis === 'z' ? 0.04 : 0.1, 2.64, axis === 'z' ? 0.1 : 0.04, this.trim, false); }
+    { const [px, pz] = fx(side * 0.16, 0); this.box(px, 2.66, pz, axis === 'z' ? 0.04 : 2.0, 0.08, axis === 'z' ? 2.0 : 0.04, this.trim, false); }
+    const statusLight = new THREE.MeshStandardMaterial({ color: 0x000000, emissive: unlocked ? accent : 0xe8584a, emissiveIntensity: 2 });
+    const strip = new THREE.Mesh(axis === 'z' ? new THREE.BoxGeometry(0.02, 0.03, 1.6) : new THREE.BoxGeometry(1.6, 0.03, 0.02), statusLight);
+    const [sx, sz] = fx(side * 0.19, 0);
+    strip.position.set(sx, 2.56, sz);
+    this.root.add(strip);
+    if (sign) {
+      const m = new THREE.MeshStandardMaterial({
+        map: signTexture([{ text: sign[0], font: `600 64px ${SANS}`, color: '#e6edf2' }, { text: sign[1], font: `500 56px ${SANS}`, color: '#9fb3c4', dir: 'rtl' }]),
+        emissive: 0xffffff, emissiveIntensity: 0.35, roughness: 0.5,
+      });
+      m.emissiveMap = m.map;
+      const plate = new THREE.Mesh(new THREE.PlaneGeometry(2.0, 0.5), m);
+      const [gx, gz] = fx(side * 0.17, 0);
+      plate.position.set(gx, 3.1, gz);
+      plate.rotation.y = axis === 'z' ? side * Math.PI / 2 : side > 0 ? 0 : Math.PI;
+      this.root.add(plate);
+    }
+    const collider = axis === 'z'
+      ? new THREE.Box3(new THREE.Vector3(x - 0.15, 0, z - 0.9), new THREE.Vector3(x + 0.15, 2.6, z + 0.9))
+      : new THREE.Box3(new THREE.Vector3(x - 0.9, 0, z - 0.15), new THREE.Vector3(x + 0.9, 2.6, z + 0.15));
+    this.colliders.push(collider);
+    const door: Door = { id, axis, unlocked, open: 0, panels, closedPos: panels.map((p) => (axis === 'z' ? p.position.z : p.position.x)), collider, center: new THREE.Vector3(x, 1.3, z), statusLight };
+    this.doors.push(door);
+    for (const p of panels) this.interactables.push({ id: 'door:' + id, object: p, actionKey: 'door' });
+    return door;
+  }
+
+  setDoorUnlocked(id: string, unlocked: boolean) {
+    const d = this.doors.find((x) => x.id === id);
+    if (!d) return;
+    d.unlocked = unlocked;
+    d.statusLight.emissive.setHex(unlocked ? 0x3ad07a : 0xe8584a);
+  }
 
   private buildDoors() {
     const labs: [LabId, number, number][] = [
@@ -537,50 +769,7 @@ export class World {
       forensics: ['Digital Forensics', 'التحقيق الجنائي الرقمي'],
       crypto: ['Cryptography & CTF', 'التشفير وتحديات CTF'],
     };
-    const panelMat = new THREE.MeshStandardMaterial({ color: 0x9aa3ab, metalness: 0.85, roughness: 0.3, map: this.mats.steel.map });
-    for (const [lab, x, z] of labs) {
-      const side = x < 0 ? 1 : -1; // direction into the lobby (+x for west wall)
-      const panels: THREE.Mesh[] = [];
-      for (const s of [-1, 1]) {
-        const p = new THREE.Mesh(new RoundedBoxGeometry(0.06, 2.58, 0.9, 2, 0.01), panelMat);
-        p.position.set(x, 1.29, z + s * 0.45);
-        this.castAll(p);
-        this.root.add(p);
-        panels.push(p);
-        const win = new THREE.Mesh(new THREE.PlaneGeometry(0.12, 1.2), this.mats.glass);
-        win.position.set(side * 0.035, 0.25, -s * 0.25);
-        win.rotation.y = side * Math.PI / 2;
-        p.add(win);
-      }
-      // frame
-      for (const s of [-1, 1]) this.box(x + side * 0.16, 1.32, z + s * 0.95, 0.04, 2.64, 0.1, this.trim, false);
-      this.box(x + side * 0.16, 2.66, z, 0.04, 0.08, 2.0, this.trim, false);
-      const statusLight = new THREE.MeshStandardMaterial({ color: 0x000000, emissive: 0x3ad07a, emissiveIntensity: 2 });
-      const strip = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.03, 1.6), statusLight);
-      strip.position.set(x + side * 0.19, 2.56, z);
-      this.root.add(strip);
-      // bilingual sign above door
-      const sign = new THREE.Mesh(
-        new THREE.PlaneGeometry(2.0, 0.5),
-        new THREE.MeshStandardMaterial({
-          map: signTexture([
-            { text: names[lab][0], font: `600 64px ${SANS}`, color: '#e6edf2' },
-            { text: names[lab][1], font: `500 56px ${SANS}`, color: '#9fb3c4', dir: 'rtl' },
-          ]),
-          emissive: 0xffffff, emissiveIntensity: 0.35, roughness: 0.5,
-        }),
-      );
-      sign.material.emissiveMap = (sign.material as THREE.MeshStandardMaterial).map;
-      sign.position.set(x + side * 0.17, 3.2, z);
-      sign.rotation.y = side * Math.PI / 2;
-      this.root.add(sign);
-      const collider = new THREE.Box3(new THREE.Vector3(x - 0.15, 0, z - 0.9), new THREE.Vector3(x + 0.15, 2.6, z + 0.9));
-      this.colliders.push(collider);
-      const door: Door = { lab, unlocked: true, open: 0, panels, closedZ: panels.map((p) => p.position.z), collider, center: new THREE.Vector3(x, 1.3, z), statusLight };
-      this.doors.push(door);
-      this.interactables.push({ id: 'door:' + lab, object: panels[0], actionKey: 'door' });
-      this.interactables.push({ id: 'door:' + lab, object: panels[1], actionKey: 'door' });
-    }
+    for (const [lab, x, z] of labs) this.makeDoor(lab, x, z, 'z', x < 0 ? 1 : -1, true, names[lab]);
   }
 
   // ---------- painters for info screens ----------
@@ -641,9 +830,9 @@ export class World {
     g.fillStyle = '#e6edf2'; g.font = `600 44px ${SANS}`;
     g.fillText(this.info.board.length ? (this.info.rtl ? 'لوحة المهام' : 'Mission board') : '', start, 52);
     this.info.board.forEach((row, i) => {
-      const y = 130 + i * 88;
+      const y = 125 + i * 80;
       g.fillStyle = i % 2 ? '#0f171e' : '#121c24';
-      g.fillRect(20, y - 38, w - 40, 76);
+      g.fillRect(20, y - 36, w - 40, 72);
       g.textAlign = this.info.rtl ? 'right' : 'left';
       g.fillStyle = '#d4dde4'; g.font = `500 32px ${SANS}`;
       g.fillText(row.label, start, y);
@@ -693,12 +882,12 @@ export class World {
     this.leds.update(time);
     let opened: string | null = null;
     for (const d of this.doors) {
-      const near = d.unlocked && Math.hypot(player.x - d.center.x, player.z - d.center.z) < 2.6;
+      const near = d.unlocked && Math.hypot(player.x - d.center.x, player.z - d.center.z) < 2.4;
       const target = near ? 1 : 0;
       const prev = d.open;
       d.open += Math.sign(target - d.open) * Math.min(Math.abs(target - d.open), dt * 2.2);
-      if (prev === 0 && d.open > 0) opened = d.lab;
-      d.panels.forEach((p, i) => { p.position.z = d.closedZ[i] + (i === 0 ? -1 : 1) * 0.88 * easeInOut(d.open); });
+      if (prev === 0 && d.open > 0) opened = d.id;
+      d.panels.forEach((p, i) => { const v = d.closedPos[i] + (i === 0 ? -1 : 1) * 0.88 * easeInOut(d.open); if (d.axis === 'z') p.position.z = v; else p.position.x = v; });
       // collider active unless mostly open
       const idx = this.colliders.indexOf(d.collider);
       if (d.open > 0.85 && idx >= 0) this.colliders.splice(idx, 1);

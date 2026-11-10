@@ -2,16 +2,18 @@
 
 A first-person 3D cybersecurity training game that runs in the browser. Walk through a realistic security academy, sit at a SOC workstation, and investigate incidents with real Linux commands — all simulated and safe.
 
-**Status: v0.2 (Phase 2).** All six labs are open, each with one fully playable mission:
+**Status: v0.3.** All six labs are open with two playable missions each (12 missions), plus a hidden **Escape Room**.
 
-| Lab | Mission | What you do |
-| --- | --- | --- |
-| SOC & Incident Response | S1 — Brute force investigation | Analyze auth.log with grep/awk/sort, block the attacker, lock the account |
-| Network Security | N1 — Harden the access switch | Cisco IOS CLI: shut unused ports, port security, save config |
-| Secure Coding | C1 — Fix the SQL injection | Rewrite a vulnerable login query in a code editor, pass the security tests |
-| Cloud Security | K1 — Exposed storage bucket | Cloud CLI: find the public bucket with HR data, lock it, encrypt it, keep the website up |
-| Digital Forensics | F1 — Evidence integrity | sha256sum -c and exiftool to find tampered evidence and who changed it |
-| Cryptography & CTF | X1 — Decode the intercept | Peel off hex, Base64 and ROT13 layers with xxd, base64 and tr |
+| Lab | Missions |
+| --- | --- |
+| SOC & Incident Response | S1 Brute force investigation · S2 Phishing analysis |
+| Network Security | N1 Harden the access switch · N2 Segment the network with VLANs (Cisco IOS CLI) |
+| Secure Coding | C1 Fix the SQL injection · C2 Fix the cross-site scripting (code editor + security tests) |
+| Cloud Security | K1 Exposed storage bucket · K2 Cryptominer on the web server |
+| Digital Forensics | F1 Evidence integrity · F2 Insider timeline |
+| Cryptography & CTF | X1 Decode the intercept · X2 Weak passwords |
+
+**Escape Room** — the door in the lobby's south-west corner. Three rooms, three puzzles, no instructions: find the clues, open each door, and get out. Your best time is saved. (Spoilers are in `src/escape/logic.ts`.)
 
 ## What works
 

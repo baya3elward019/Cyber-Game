@@ -5,9 +5,15 @@ import { missionC1 } from './coding/c1/mission';
 import { missionK1 } from './cloud/k1/mission';
 import { missionF1 } from './forensics/f1/mission';
 import { missionX1 } from './crypto/x1/mission';
+import { missionS2 } from './soc/s2/mission';
+import { missionN2 } from './network/n2/mission';
+import { missionC2 } from './coding/c2/mission';
+import { missionK2 } from './cloud/k2/mission';
+import { missionF2 } from './forensics/f2/mission';
+import { missionX2 } from './crypto/x2/mission';
 
 /** Every playable mission. Add new missions here. */
-export const MISSIONS: MissionDef[] = [missionS1, missionN1, missionC1, missionK1, missionF1, missionX1];
+export const MISSIONS: MissionDef[] = [missionS1, missionN1, missionC1, missionK1, missionF1, missionX1, missionS2, missionN2, missionC2, missionK2, missionF2, missionX2];
 
 export const missionById = (id: string) => MISSIONS.find((m) => m.id === id);
 export const missionsInLab = (lab: LabId) => MISSIONS.filter((m) => m.lab === lab).sort((a, b) => a.order - b.order);

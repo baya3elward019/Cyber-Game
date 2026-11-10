@@ -10,6 +10,8 @@ import { CONFIG } from './config';
 import { loadSave, writeSave, exportSave, importSave, type SaveData, type Lang, type Quality, type Settings } from '../progression/save';
 import { computeXp, recordCompletion, rankFor, totalXp, evaluateAchievements } from '../progression/progress';
 import { missionById, missionsInLab, MISSIONS } from '../missions/registry';
+import { checkPin, flipBreaker, missionEsc2, POSTER, CRASH_LOG } from '../escape/logic';
+import { fmtTime } from '../ui/dom';
 import type { LabId } from '../missions/types';
 
 type State = 'menu' | 'playing' | 'paused' | 'mission';
@@ -36,6 +38,7 @@ export class Game {
   private dev = new URLSearchParams(location.search).has('dev');
   private fps = { frames: 0, acc: 0, value: 0 };
   private lastSave = 0;
+  private esc = { active: false, start: 0, seq: [] as string[], run: null as MissionRun | null, lastObj: 0 };
 
   constructor(private canvas: HTMLCanvasElement) {
     const loaded = loadSave();
@@ -93,7 +96,7 @@ export class Game {
 
   // ---------- views ----------
 
-  private view(fn: () => void) { this.reopen = fn; fn(); }
+  private view(fn: () => void) { this.ui.setPrompt(null); this.target = null; this.reopen = fn; fn(); }
 
   private showMenu(notice?: string) {
     this.state = 'menu';
@@ -204,6 +207,7 @@ export class Game {
   }
 
   private updateObjective(big = false) {
+    if (this.esc.active) { this.ui.setObjective(t('esc.objective', { t: fmtTime(performance.now() - this.esc.start) }), big); return; }
     const done = (id: string) => this.save.missions[id]?.completed;
     const next = MISSIONS.find((m) => !done(m.id));
     const text = !MISSIONS.some((m) => done(m.id)) ? t('objective.goSoc')
@@ -226,7 +230,7 @@ export class Game {
         return ms.length
           ? { label: t('lab.' + lab), status: t('board.done', { done, total: ms.length }), ok: true }
           : { label: t('lab.' + lab), status: t('board.soon'), ok: false };
-      }),
+      }).concat([{ label: t('esc.board.row'), status: this.save.escape.completed && this.save.escape.bestTimeMs !== null ? fmtTime(this.save.escape.bestTimeMs) : t('esc.board.open'), ok: true }]),
     });
   }
 
@@ -273,21 +277,26 @@ export class Game {
     this.target = it;
     if (!it) { this.ui.setPrompt(null); return; }
     if (it.id.startsWith('door:')) {
-      const lab = it.id.slice(5);
-      const door = this.world.doors.find((d) => d.lab === lab)!;
+      const id = it.id.slice(5);
+      const door = this.world.doors.find((d) => d.id === id)!;
       if (door.unlocked) { this.ui.setPrompt(null); this.target = null; return; }
-      this.ui.setPrompt({ text: `${t('lab.' + lab)} — ${t('door.soon')}`, dim: true });
+      this.ui.setPrompt({ text: id.startsWith('esc') ? t('esc.locked') : `${t('lab.' + id)} — ${t('door.soon')}`, dim: true });
       return;
     }
+    if (it.id.startsWith('esc:breaker:')) { this.ui.setPrompt({ key: 'E', text: `${t('act.esc.breaker')} — RACK-${it.id.slice(12)}` }); return; }
     this.ui.setPrompt({ key: 'E', text: t(it.actionKey) });
   }
 
   private interact() {
     const it = this.target;
     if (!it) return;
+    this.ui.setPrompt(null);
+    this.target = null;
+    this.player.clearInput();
     if (it.id.startsWith('door:')) { this.sfx.denied(); return; }
     this.sfx.ui();
     if (it.id.startsWith('lab:')) { this.openLab(it.id.slice(4) as LabId); return; }
+    if (it.id.startsWith('esc:')) { this.escInteract(it.id); return; }
     document.exitPointerLock();
     this.state = 'paused';
     this.player.enabled = false;
@@ -295,6 +304,91 @@ export class Game {
     if (it.id === 'reception') {
       this.view(() => this.ui.showInfo(t('app.title'), [t('reception.welcome', { name: this.save.nickname }), this.objectiveText()], back));
     } else this.showProgress(back);
+  }
+
+  // ---------- escape room ----------
+
+  private startEscape() {
+    this.esc = { active: true, start: performance.now(), seq: [], run: null, lastObj: 0 };
+    this.world.resetEscape();
+    this.world.setDoorUnlocked('esc-a', false);
+    this.sfx.denied();
+    this.ui.toast(t('esc.intro'), 'warn', 6000);
+  }
+
+  private escInteract(id: string) {
+    if (id.startsWith('esc:breaker:')) {
+      const b = id.slice(12);
+      const r = flipBreaker(this.esc.seq, b);
+      if (r.result === 'already') return;
+      this.esc.seq = r.seq;
+      if (r.result === 'trip') { ['A', 'B', 'C'].forEach((x) => this.world.setBreaker(x, false)); this.sfx.error(); this.ui.toast(t('esc.breaker.trip'), 'bad'); return; }
+      this.world.setBreaker(b, true);
+      if (r.result === 'done') { this.world.setDoorUnlocked('esc-d', true); this.sfx.complete(); this.ui.toast(t('esc.breaker.done'), 'ok', 4500); }
+      else { this.sfx.objective(); this.ui.toast(t('esc.breaker.on', { id: 'RACK-' + b }), 'ok', 1800); }
+      return;
+    }
+    if (id === 'esc:terminal') { this.openEscTerminal(); return; }
+    document.exitPointerLock();
+    this.state = 'paused';
+    this.player.enabled = false;
+    const back = () => this.enterGame();
+    const info = (title: string, lines: string[], mono?: string) => this.view(() => this.ui.showInfo(title, lines, back, mono));
+    switch (id) {
+      case 'esc:note': return info(t('esc.note.title'), [t('esc.note.body')]);
+      case 'esc:poster': return info(t('esc.poster.title'), [], POSTER);
+      case 'esc:board': return info(t('esc.board.title'), [t('esc.board.body')]);
+      case 'esc:label': return info(t('esc.label.title'), [t('esc.label.body')]);
+      case 'esc:plaque': return info(t('esc.plaque.title'), [t('esc.plaque.body')]);
+      case 'esc:crash': return info(t('esc.crash.title'), [], CRASH_LOG.map(([r, tm]) => `${r}  kernel: PSU failure  power lost at ${tm}`).join('\n'));
+      case 'esc:keypad':
+        return this.view(() => this.ui.showKeypad((code) => {
+          const ok = checkPin(code);
+          if (ok) { this.world.setDoorUnlocked('esc-b', true); this.sfx.objective(); this.ui.toast(t('esc.unlocked'), 'ok'); } else this.sfx.denied();
+          return ok;
+        }, back));
+    }
+    if (id.startsWith('esc:warden:')) return info(t('esc.warden.title'), [t('esc.warden.' + id.slice(11))]);
+    back();
+  }
+
+  private openEscTerminal() {
+    if (!this.esc.run || this.esc.run.finished) { this.esc.run = new MissionRun(missionEsc2); this.esc.run.started = true; }
+    this.state = 'mission';
+    this.player.enabled = false;
+    this.player.clearInput();
+    this.ui.showHud(false);
+    document.exitPointerLock();
+    this.mountMission(this.esc.run);
+  }
+
+  private finishEscape() {
+    const time = performance.now() - this.esc.start;
+    this.esc.active = false;
+    const e = this.save.escape;
+    e.runs++;
+    e.completed = true;
+    e.bestTimeMs = e.bestTimeMs === null ? time : Math.min(e.bestTimeMs, time);
+    if (!this.save.achievements.includes('escape')) { this.save.achievements.push('escape'); this.ui.toast(t('toast.achievement', { name: t('ach.escape') }), 'ok', 5000); }
+    this.persist();
+    this.sfx.complete();
+    document.exitPointerLock();
+    this.state = 'paused';
+    this.player.enabled = false;
+    this.view(() => this.ui.showEscapeDone(time, e.bestTimeMs!, () => {
+      this.world.resetEscape();
+      this.player.place(new THREE.Vector3(-8, 0, 8.3), 0);
+      this.updateObjective();
+      this.enterGame();
+    }));
+  }
+
+  private updateEscape(time: number) {
+    const p = this.player.position;
+    if (!this.esc.active && p.z > 11 && p.x < -6.2 && p.x > -9.8) this.startEscape();
+    if (!this.esc.active) return;
+    if (p.z > 32.8) { this.finishEscape(); return; }
+    if (time - this.esc.lastObj > 0.5) { this.esc.lastObj = time; this.ui.setObjective(t('esc.objective', { t: fmtTime(performance.now() - this.esc.start) })); }
   }
 
   // ---------- missions ----------
@@ -340,7 +434,10 @@ export class Game {
       onFeedback: (ok, key) => { if (!ok) this.sfx.error(); this.ui.toast(t(key), ok ? 'ok' : 'warn', 5200); },
       onHint: () => { this.save.stats.hintsUsed++; this.persist(); },
       onLeave: () => this.closeMission(),
-      onComplete: (timeMs, hints) => this.completeMission(run, timeMs, hints),
+      onComplete: (timeMs, hints) => {
+        if (run.def.id === 'esc2') { this.closeMission(); this.world.setDoorUnlocked('esc-c', true); this.sfx.objective(); this.ui.toast(t('esc.unlocked'), 'ok'); return; }
+        this.completeMission(run, timeMs, hints);
+      },
     });
     this.missionUI = ui;
     this.reopen = null;
@@ -385,7 +482,8 @@ export class Game {
       this.camera.lookAt(0, 2.3, -9);
     } else {
       this.player.update(this.state === 'playing' ? dt : 0, this.world.colliders);
-      if (this.state === 'playing') this.updatePrompt();
+      if (this.state === 'playing') { this.updatePrompt(); this.updateEscape(time); }
+      else if (this.target) { this.target = null; this.ui.setPrompt(null); }
     }
     if (this.state === 'playing' || this.state === 'mission') this.save.stats.playTimeMs += dt * 1000;
 

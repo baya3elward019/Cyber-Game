@@ -40,6 +40,8 @@ export interface MissionDef {
   hintCount: number;
   /** Seconds under which the speed bonus is granted. */
   parTime: number;
+  /** Hints cost nothing (escape room). */
+  freeHints?: boolean;
   createSession(): MissionSession;
 }
 // i18n keys per mission: mission.<id>.title / .brief / .obj.<objectiveId> / .hint.<n> / .debrief.<n>

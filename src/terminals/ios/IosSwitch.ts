@@ -2,7 +2,7 @@ import type { Console } from '../types';
 
 /** A small but faithful simulation of a Cisco IOS access switch CLI. */
 
-export type Mode = 'user' | 'priv' | 'config' | 'if';
+export type Mode = 'user' | 'priv' | 'config' | 'if' | 'vlan';
 
 export interface Iface {
   name: string;   // FastEthernet0/1
@@ -29,6 +29,8 @@ export class IosSwitch implements Console {
   hostname: string;
   ifaces: Iface[];
   selected: Iface[] = [];
+  vlans = new Map<number, string>([[1, 'default']]);
+  private curVlan = 0;
   /** Config generation counter; savedGen === gen means startup-config is current. */
   gen = 0;
   savedGen = 0;
@@ -41,7 +43,7 @@ export class IosSwitch implements Console {
   get title() { return `console — ${this.hostname} (9600 8N1)`; }
 
   get prompt() {
-    const p = { user: '>', priv: '#', config: '(config)#', if: this.selected.length > 1 ? '(config-if-range)#' : '(config-if)#' }[this.mode];
+    const p = { user: '>', priv: '#', config: '(config)#', vlan: '(config-vlan)#', if: this.selected.length > 1 ? '(config-if-range)#' : '(config-if)#' }[this.mode];
     return this.hostname + p;
   }
 
@@ -85,7 +87,8 @@ export class IosSwitch implements Console {
     const words: Record<Mode, string[]> = {
       user: ['enable', 'show', 'exit', 'ping'],
       priv: ['configure', 'show', 'copy', 'write', 'disable', 'exit', 'ping'],
-      config: ['interface', 'hostname', 'exit', 'end', 'do', 'no'],
+      config: ['interface', 'hostname', 'vlan', 'exit', 'end', 'do', 'no'],
+      vlan: ['name', 'exit', 'end'],
       if: ['shutdown', 'no', 'description', 'switchport', 'exit', 'end', 'do', 'interface'],
     };
     const m = line.match(/^(\s*)(\S*)$/);
@@ -105,7 +108,8 @@ export class IosSwitch implements Console {
     const h: Record<Mode, string> = {
       user: 'Exec commands:\n  enable     Turn on privileged commands\n  exit       Exit from the EXEC\n  ping       Send echo messages\n  show       Show running system information\n',
       priv: 'Exec commands:\n  configure  Enter configuration mode\n  copy       Copy from one file to another\n  disable    Turn off privileged commands\n  exit       Exit from the EXEC\n  ping       Send echo messages\n  show       Show running system information\n  write      Write running configuration to memory\n',
-      config: 'Configure commands:\n  do         To run exec commands in config mode\n  end        Exit from configure mode\n  exit       Exit from configure mode\n  hostname   Set system\'s network name\n  interface  Select an interface to configure\n  no         Negate a command or set its defaults\n',
+      config: 'Configure commands:\n  do         To run exec commands in config mode\n  end        Exit from configure mode\n  exit       Exit from configure mode\n  hostname   Set system\'s network name\n  interface  Select an interface to configure\n  no         Negate a command or set its defaults\n  vlan       Vlan commands\n',
+      vlan: 'VLAN configuration commands:\n  end   Exit from configure mode\n  exit  Apply changes and exit\n  name  Ascii name of the VLAN\n',
       if: 'Interface configuration commands:\n  description  Interface specific description\n  do           To run exec commands in config mode\n  end          Exit from configure mode\n  exit         Exit from interface configuration mode\n  no           Negate a command or set its defaults\n  shutdown     Shutdown the selected interface\n  switchport   Set switching mode characteristics\n',
     };
     return h[this.mode];
@@ -119,6 +123,14 @@ export class IosSwitch implements Console {
       case 'priv': return this.execPriv(t, raw);
       case 'config': return this.execConfig(t, raw);
       case 'if': return this.execIf(t, raw);
+      case 'vlan': {
+        const c = this.kw(t[0], ['name', 'exit', 'end', 'vlan', 'interface', 'do']);
+        if (c === 'vlan' || c === 'interface' || c === 'do') { this.mode = 'config'; return this.execConfig(t, raw); }
+        if (c === 'name') { if (!t[1]) return '% Incomplete command.\n'; this.vlans.set(this.curVlan, t[1].slice(0, 32)); this.changed(); return ''; }
+        if (c === 'exit') { this.mode = 'config'; return ''; }
+        if (c === 'end') { this.mode = 'priv'; return ''; }
+        return INVALID(raw, this.prompt.length);
+      }
     }
   }
 
@@ -166,9 +178,15 @@ export class IosSwitch implements Console {
   }
 
   private execConfig(t: string[], raw: string): string {
-    const c = this.kw(t[0], ['interface', 'hostname', 'exit', 'end', 'do', 'no']);
+    const c = this.kw(t[0], ['interface', 'hostname', 'vlan', 'exit', 'end', 'do', 'no']);
     if (c === 'AMBIG') return `% Ambiguous command:  "${raw}"\n`;
     switch (c) {
+      case 'vlan': {
+        const n = Number(t[1]);
+        if (!Number.isInteger(n) || n < 2 || n > 4094) return '% Bad VLAN list - character #1 is a non-numeric\ncharacter or out of range (2-4094).\n';
+        if (!this.vlans.has(n)) { this.vlans.set(n, 'VLAN' + String(n).padStart(4, '0')); this.changed(); }
+        this.curVlan = n; this.mode = 'vlan'; return '';
+      }
       case 'exit': case 'end': this.mode = 'priv'; return '';
       case 'do': return this.execPriv(t.slice(1), t.slice(1).join(' '));
       case 'hostname':
@@ -236,8 +254,10 @@ export class IosSwitch implements Console {
     }
     if (c === 'access') {
       if (this.kw(t[1], ['vlan']) !== 'vlan' || !/^\d+$/.test(t[2] ?? '')) return '% Incomplete command.\n';
+      let msg = '';
+      if (!neg && !this.vlans.has(+t[2])) { this.vlans.set(+t[2], 'VLAN' + t[2].padStart(4, '0')); msg = `% Access VLAN does not exist. Creating vlan ${t[2]}\n`; }
       for (const i of sel) i.vlan = neg ? 1 : +t[2];
-      this.changed(); return '';
+      this.changed(); return msg;
     }
     // port-security
     let out = '';
@@ -286,13 +306,14 @@ export class IosSwitch implements Console {
       }
       case 'vlan':
         return 'VLAN Name                             Status    Ports\n---- -------------------------------- --------- -------------------------------\n' +
-          [...new Set(this.ifaces.map((i) => i.vlan))].sort((a, b) => a - b).map((v) => `${String(v).padEnd(5)}${(v === 1 ? 'default' : 'VLAN' + String(v).padStart(4, '0')).padEnd(33)}active    ${this.ifaces.filter((i) => i.vlan === v && i.mode !== 'trunk').map((i) => i.short).join(', ')}`).join('\n') + '\n';
+          [...this.vlans.keys()].sort((a, b) => a - b).map((v) => `${String(v).padEnd(5)}${(this.vlans.get(v) ?? '').padEnd(33)}active    ${this.ifaces.filter((i) => i.vlan === v && i.mode !== 'trunk').map((i) => i.short).join(', ')}`).join('\n') + '\n';
     }
     return '';
   }
 
   private runningConfig(): string {
     let s = `Building configuration...\n\nCurrent configuration : 2148 bytes\n!\nversion 15.0\nhostname ${this.hostname}\n!\nenable secret 5 $1$mERr$hx5rVt7rPNoS4wqbXKX7m0\n!\n`;
+    for (const [v, n] of this.vlans) if (v !== 1) s += `vlan ${v}\n name ${n}\n!\n`;
     for (const i of this.ifaces) {
       s += `interface ${i.name}\n`;
       if (i.description) s += ` description ${i.description}\n`;

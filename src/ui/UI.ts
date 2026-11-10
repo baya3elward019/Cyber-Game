@@ -1,4 +1,4 @@
-import { h, fmtTime, SHIELD_SVG } from './dom';
+import { h, fmtTime, SHIELD_SVG, richText } from './dom';
 import { t, getLang } from '../i18n';
 import { CONFIG } from '../core/config';
 import type { SaveData, Lang, Quality, Settings } from '../progression/save';
@@ -187,6 +187,10 @@ export class UI {
         h('div', { class: 'muted' }, rank.next ? t('progress.next', { n: rank.next.xp - xp, rank: t('rank.' + rank.next.id) }) : t('progress.maxRank'))),
       h('h3', {}, t('progress.missions')),
       ...labs,
+      h('h3', {}, t('progress.escape')),
+      h('div', { class: 'item' }, h('span', {}, t('progress.escape')), save.escape.completed && save.escape.bestTimeMs !== null
+        ? h('span', { class: 's-ok' }, t('esc.done.best', { t: fmtTime(save.escape.bestTimeMs) }))
+        : h('span', { class: 's-no' }, t('progress.escapeNot'))),
       h('h3', {}, t('progress.achievements')),
       h('div', { class: 'list' }, ...ACHIEVEMENTS.map((a) => {
         const got = save.achievements.includes(a);
@@ -252,8 +256,46 @@ export class UI {
     ], a.resume);
   }
 
-  showInfo(title: string, lines: string[], onClose: () => void) {
-    this.panel(title, lines.map((l) => h('p', {}, l)), onClose);
+  showInfo(title: string, lines: string[], onClose: () => void, mono?: string) {
+    this.panel(title, [...lines.map((l) => h('p', {}, richText(l))), ...(mono ? [h('pre', { class: 'mono-block' }, mono)] : [])], onClose);
+  }
+
+  showKeypad(check: (code: string) => boolean, onClose: () => void) {
+    let code = '';
+    let locked = false;
+    const display = h('div', { class: 'kp-display', 'aria-live': 'assertive' }, '····');
+    const draw = () => { display.className = 'kp-display'; display.textContent = code ? code.padEnd(4, '·') : '····'; };
+    const press = (k: string) => {
+      if (locked) return;
+      if (k === 'C') { code = ''; draw(); return; }
+      if (k === 'E') {
+        if (!code) return;
+        locked = true;
+        if (check(code)) { display.className = 'kp-display ok'; display.textContent = t('esc.keypad.granted'); setTimeout(onClose, 800); }
+        else { display.className = 'kp-display bad'; display.textContent = t('esc.keypad.denied'); setTimeout(() => { locked = false; code = ''; draw(); }, 900); }
+        return;
+      }
+      if (code.length < 6) { code += k; draw(); }
+    };
+    const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', 'E'];
+    const pad = h('div', { class: 'keypad' }, ...keys.map((k) => h('button', { class: 'kp-key' + (k === 'E' ? ' enter' : ''), onclick: () => press(k) }, k === 'C' ? t('esc.keypad.clear') : k === 'E' ? t('esc.keypad.enter') : k)));
+    const scrim = this.panel(t('esc.keypad.title'), [display, pad], onClose);
+    scrim.addEventListener('keydown', (e: KeyboardEvent) => {
+      if (/^[0-9]$/.test(e.key)) press(e.key);
+      else if (e.key === 'Enter') { e.preventDefault(); press('E'); }
+      else if (e.key === 'Backspace') { code = code.slice(0, -1); draw(); }
+    });
+    queueMicrotask(() => (scrim.querySelector('.kp-key') as HTMLElement)?.focus());
+  }
+
+  showEscapeDone(timeMs: number, bestMs: number, onBack: () => void) {
+    this.panel(t('esc.done.title'), [
+      h('p', {}, t('esc.done.body')),
+      h('div', { class: 'stat-grid' },
+        h('div', { class: 'stat' }, h('div', { class: 'v' }, fmtTime(timeMs)), h('div', { class: 'l' }, t('esc.done.time', { t: '' }).replace(/[:：]\s*$/, ''))),
+        h('div', { class: 'stat' }, h('div', { class: 'v' }, fmtTime(bestMs)), h('div', { class: 'l' }, t('esc.done.best', { t: '' }).replace(/[:：]\s*$/, '')))),
+      h('div', { class: 'btn-row' }, h('button', { class: 'btn primary', onclick: onBack }, t('esc.done.back'))),
+    ], onBack);
   }
 
   // ---------- HUD ----------

@@ -52,7 +52,7 @@ export function recordCompletion(save: SaveData, missionId: string, xp: XpBreakd
   return { xp, gained, newBest: gained > 0, newAchievements };
 }
 
-export const ACHIEVEMENTS = ['first_mission', 'no_hints', 'speedrunner', 'cli_native', 'lab_soc', 'all_labs'] as const;
+export const ACHIEVEMENTS = ['first_mission', 'no_hints', 'speedrunner', 'cli_native', 'lab_soc', 'all_labs', 'escape'] as const;
 
 export function evaluateAchievements(save: SaveData, ctx?: { missionId: string; hintsUsed: number; timeMs: number; labMissionIds: string[]; allLabs?: string[][] }): string[] {
   const earned: string[] = [];
