@@ -74,5 +74,7 @@ export class Sfx {
   objective() { this.tone(660, 0.12, 0.12, 'triangle'); this.tone(990, 0.2, 0.12, 'triangle', 0.1); }
   error() { this.tone(160, 0.22, 0.12, 'square'); }
   complete() { [523, 659, 784, 1046].forEach((f, i) => this.tone(f, 0.35, 0.12, 'triangle', i * 0.11)); }
+  robot() { [880, 1320, 990].forEach((f, i) => this.tone(f, 0.07, 0.05, 'sine', i * 0.07)); }
+  alarm() { this.tone(740, 0.35, 0.09, 'sawtooth'); this.tone(554, 0.35, 0.09, 'sawtooth', 0.38); }
   denied() { this.tone(220, 0.12, 0.08, 'square'); this.tone(180, 0.18, 0.08, 'square', 0.12); }
 }

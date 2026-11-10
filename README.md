@@ -2,7 +2,7 @@
 
 A first-person 3D cybersecurity training game that runs in the browser. Walk through a realistic security academy, sit at a SOC workstation, and investigate incidents with real Linux commands — all simulated and safe.
 
-**Status: v0.3.** All six labs are open with two playable missions each (12 missions), plus a hidden **Escape Room**.
+**Status: v0.4.** Six labs with two missions each (12 missions), three escape rooms, a timed RED ALERT drill, a daily challenge and NEXA, the receptionist robot.
 
 | Lab | Missions |
 | --- | --- |
@@ -13,7 +13,13 @@ A first-person 3D cybersecurity training game that runs in the browser. Walk thr
 | Digital Forensics | F1 Evidence integrity · F2 Insider timeline |
 | Cryptography & CTF | X1 Decode the intercept · X2 Weak passwords |
 
-**Escape Room** — the door in the lobby's south-west corner. Three rooms, three puzzles, no instructions: find the clues, open each door, and get out. Your best time is saved. (Spoilers are in `src/escape/logic.ts`.)
+**Escape rooms** — the door in the lobby's south-west corner. Pick a scenario at the kiosk next to it (The Vault, Binary Lock, Cipher Room). Three rooms, three puzzles each, no instructions. Best time per room is saved. (Spoilers: `src/escape/`.)
+
+**RED ALERT** — the red console next to the reception. A ransomware outbreak with a 15-minute timer: find patient zero in the SOC, isolate it in Network, disable the stolen key in Cloud, restore a clean backup in Forensics.
+
+**Daily challenge** — the reception monitor. A new small puzzle every day (same for everyone), with streaks and bonus XP.
+
+**NEXA** — the robot behind the reception greets you by name and gives tips. Walk up to her or press E.
 
 ## What works
 

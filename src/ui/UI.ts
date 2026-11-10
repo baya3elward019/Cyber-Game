@@ -23,12 +23,15 @@ export class UI {
   private xpbox = h('div', { class: 'xpbox' });
   private toasts = h('div', { class: 'toasts', 'aria-live': 'polite' });
   private dev = h('div', { class: 'dev' });
+  private speech = h('div', { class: 'speech', 'aria-live': 'polite' });
+  private speechTimer = 0;
   private layer = h('div', { style: 'position:absolute;inset:0;pointer-events:none' });
   private modal: HTMLElement | null = null;
 
   constructor() {
     this.hud.append(this.crosshair, this.prompt, this.objective, this.xpbox);
-    this.root.append(this.layer, this.hud, this.toasts);
+    this.root.append(this.layer, this.hud, this.toasts, this.speech);
+    this.speech.style.display = 'none';
     this.showHud(false);
     this.setPrompt(null);
   }
@@ -191,6 +194,10 @@ export class UI {
       h('div', { class: 'item' }, h('span', {}, t('progress.escape')), save.escape.completed && save.escape.bestTimeMs !== null
         ? h('span', { class: 's-ok' }, t('esc.done.best', { t: fmtTime(save.escape.bestTimeMs) }))
         : h('span', { class: 's-no' }, t('progress.escapeNot'))),
+      h('div', { class: 'item' }, h('span', {}, t('progress.redAlert')), save.redAlert.completed && save.redAlert.bestTimeMs !== null
+        ? h('span', { class: 's-ok' }, t('ra.best', { t: fmtTime(save.redAlert.bestTimeMs) }))
+        : h('span', { class: 's-no' }, t('progress.redAlertNot'))),
+      h('div', { class: 'item' }, h('span', {}, t('progress.daily')), h('span', { class: save.daily.total ? 's-ok' : 's-no' }, t('progress.dailyStreak', { n: save.daily.streak, t: save.daily.total }))),
       h('h3', {}, t('progress.achievements')),
       h('div', { class: 'list' }, ...ACHIEVEMENTS.map((a) => {
         const got = save.achievements.includes(a);
@@ -300,7 +307,26 @@ export class UI {
 
   // ---------- HUD ----------
 
-  showHud(on: boolean) { this.hud.style.display = on ? '' : 'none'; }
+  showHud(on: boolean) { this.hud.style.display = on ? '' : 'none'; if (!on) this.speech.style.display = 'none'; }
+
+  say(name: string, text: string, ms = 6500) {
+    this.speech.replaceChildren(h('b', {}, name), h('span', {}, text));
+    this.speech.style.display = '';
+    clearTimeout(this.speechTimer);
+    this.speechTimer = window.setTimeout(() => { this.speech.style.display = 'none'; }, ms);
+  }
+
+  showEscapePicker(items: { id: string; title: string; desc: string; best: number | null; current: boolean }[], onPick: (id: string) => void, onClose: () => void) {
+    this.panel(t('esc.pick.title'), [h('div', { class: 'list picker' }, ...items.map((it) => h('div', { class: 'item' },
+      h('div', {}, h('div', {}, it.title), h('div', { class: 'muted' }, it.desc + (it.best !== null ? ' · ' + t('esc.done.best', { t: fmtTime(it.best) }) : ''))),
+      it.current ? h('span', { class: 's-ok' }, t('esc.pick.current')) : h('button', { class: 'btn primary', onclick: () => onPick(it.id) }, t('esc.pick.arm')))))], onClose);
+  }
+
+  showResult(title: string, body: string, button: string, onClose: () => void, primary?: { label: string; action: () => void }) {
+    this.panel(title, [h('p', {}, richText(body)), h('div', { class: 'btn-row' },
+      primary ? h('button', { class: 'btn primary', onclick: primary.action }, primary.label) : null,
+      h('button', { class: 'btn' + (primary ? '' : ' primary'), onclick: onClose }, button))], onClose);
+  }
 
   setPrompt(p: { key?: string; text: string; dim?: boolean } | null) {
     if (!p) { this.prompt.style.display = 'none'; return; }

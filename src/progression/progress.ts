@@ -14,7 +14,7 @@ export const NO_HINT_BONUS = 100;
 export const SPEED_BONUS = 75;
 
 export function totalXp(save: SaveData): number {
-  return Object.values(save.missions).reduce((s, m) => s + m.bestXp, 0);
+  return Object.values(save.missions).reduce((s, m) => s + m.bestXp, 0) + (save.bonusXp ?? 0);
 }
 
 export function rankFor(xp: number) {
@@ -52,7 +52,7 @@ export function recordCompletion(save: SaveData, missionId: string, xp: XpBreakd
   return { xp, gained, newBest: gained > 0, newAchievements };
 }
 
-export const ACHIEVEMENTS = ['first_mission', 'no_hints', 'speedrunner', 'cli_native', 'lab_soc', 'all_labs', 'escape'] as const;
+export const ACHIEVEMENTS = ['first_mission', 'no_hints', 'speedrunner', 'cli_native', 'lab_soc', 'all_labs', 'escape', 'escape_all', 'red_alert', 'daily_3'] as const;
 
 export function evaluateAchievements(save: SaveData, ctx?: { missionId: string; hintsUsed: number; timeMs: number; labMissionIds: string[]; allLabs?: string[][] }): string[] {
   const earned: string[] = [];

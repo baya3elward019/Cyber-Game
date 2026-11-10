@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import type { Quality } from '../progression/save';
 import type { LabId } from '../missions/types';
+import type { EscapeScenario } from '../escape/scenarios';
+import { SCENARIOS } from '../escape/scenarios';
 import { Mats, LedField, serverRack, monitor, desk, chair, wallScreen, newScreen } from './equipment';
 import { concrete, floorTiles, signTexture, wallPanels } from './textures';
 import { painters, painters2, SANS, type ScreenTexture } from './screens';
@@ -68,6 +70,7 @@ export class World {
     this.buildSocLab();
     this.buildOtherLabs();
     this.buildEscape();
+    this.buildExtras();
     this.buildDoors();
     for (let i = 0; i < 3; i++) { const l = new THREE.PointLight(0xffffff, 0, 10, 2); this.pool.push(l); this.root.add(l); }
     this.setZone('soc');
@@ -230,7 +233,7 @@ export class World {
     recMon.position.set(0, 1.11, -5.55);
     this.castAll(recMon);
     this.root.add(recMon);
-    this.interactables.push({ id: 'reception', object: recMon, actionKey: 'act.reception' });
+    this.interactables.push({ id: 'daily', object: recMon, actionKey: 'act.daily' });
 
     // mission board (north wall, left)
     const board = this.screen(1024, 680, (g, w, h) => this.paintBoard(g, w, h), 0);
@@ -277,7 +280,7 @@ export class World {
 
     // lighting
     this.root.add(new THREE.HemisphereLight(0xcfe3ff, 0x2a2622, 0.35));
-    for (const [x, z] of [[-5, -4], [5, -4], [0, 5]]) this.light(x, LOBBY_H - 0.3, z, 0xf0f4ff, 14, 16);
+    for (const [x, z] of [[-5, -4], [5, -4], [0, 5]]) this.lobbyLights.push(this.light(x, LOBBY_H - 0.3, z, 0xf0f4ff, 14, 16));
     this.spot(0, LOBBY_H - 0.1, -2, 0, -5.6, 40);
   }
 
@@ -532,11 +535,15 @@ export class World {
 
   // ---------- escape room ----------
 
+  private escProps: EscapeScenario['props'] = SCENARIOS[0].props;
+  private escTitle = 'The Vault';
+  private escScreens: ScreenTexture[] = [];
   private breakers = new Map<string, THREE.MeshStandardMaterial>();
   private breakerLevers = new Map<string, THREE.Mesh>();
 
   private infoPlane(x: number, y: number, z: number, rotY: number, w: number, h: number, painter: Parameters<typeof newScreen>[2], id: string, actionKey: string, px = 512, emissive = 0.6) {
     const s = newScreen(px, Math.round((px * h) / w), painter, 0);
+    this.escScreens.push(s);
     const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshStandardMaterial({ map: s.texture, emissive: 0xffffff, emissiveMap: s.texture, emissiveIntensity: emissive, roughness: 0.7 }));
     m.position.set(x, y, z);
     m.rotation.y = rotY;
@@ -608,18 +615,19 @@ export class World {
     const note = new THREE.Mesh(new THREE.PlaneGeometry(0.09, 0.09), new THREE.MeshStandardMaterial({ color: 0xf5e663, emissive: 0x3a3510, roughness: 0.9 }));
     note.position.set(0.24, 1.0, -0.17); desk1.add(note);
     this.infoPlane(-11.84, 1.7, 17.3, E, 1.0, 1.3, (g, w, h) => {
+      const P = this.escProps.poster;
       g.fillStyle = '#f2f0e8'; g.fillRect(0, 0, w, h);
-      g.fillStyle = '#222'; g.font = `600 30px ${SANS}`; g.fillText('NETWORK SCAN — VAULT-GW', 30, 60);
+      g.fillStyle = '#222'; g.font = `600 28px ${SANS}`; g.fillText(P.title, 30, 60);
       g.font = `22px "JetBrains Mono", monospace`;
-      ['PORT      STATE  SERVICE', '22/tcp    open   ssh', '80/tcp    open   http', '3389/tcp  open   ms-wbt-server'].forEach((l, i) => g.fillText(l, 30, 140 + i * 50));
-      g.strokeStyle = '#c0392b'; g.lineWidth = 4; g.strokeRect(22, 270, w - 44, 46);
+      P.lines.forEach((l, i) => g.fillText(l, 30, 140 + i * 50));
+      if (P.highlight >= 0) { g.strokeStyle = '#c0392b'; g.lineWidth = 4; g.strokeRect(22, 140 + P.highlight * 50 - 30, w - 44, 46); }
     }, 'esc:poster', 'act.esc.poster', 512, 0.25);
     this.infoPlane(-2.16, 1.7, 17, W, 2.2, 1.2, (g, w, h) => {
+      const B = this.escProps.board;
       g.fillStyle = '#f7f7f4'; g.fillRect(0, 0, w, h);
-      g.fillStyle = '#1f4fa0'; g.font = `600 44px ${SANS}`; g.fillText('PATCHING THIS WEEK', 40, 70);
+      g.fillStyle = '#1f4fa0'; g.font = `600 44px ${SANS}`; g.fillText(B.title, 40, 70);
       g.font = `40px ${SANS}`;
-      g.fillStyle = '#1d7a3a'; g.fillText('✔ SSH', 60, 150); g.fillText('✔ Web server (nginx)', 60, 215);
-      g.fillStyle = '#b3261e'; g.fillText('✘ Remote Desktop — postponed', 60, 280);
+      B.lines.forEach(([txt, col], i) => { g.fillStyle = col; g.fillText(txt, 60, 150 + i * 65); });
     }, 'esc:board', 'act.esc.board', 1024, 0.2);
     const keypad = new THREE.Group();
     keypad.add(new THREE.Mesh(new RoundedBoxGeometry(0.18, 0.26, 0.04, 2, 0.01), this.mats.darkMetal));
@@ -639,8 +647,8 @@ export class World {
     this.rackRow(-2.8, 20.9, 5, 'z', W, 13);
     this.infoPlane(-10.68, 1.45, 22.15, E, 0.36, 0.24, (g, w, h) => {
       g.fillStyle = '#fafafa'; g.fillRect(0, 0, w, h);
-      g.fillStyle = '#111'; g.font = `600 40px ${SANS}`; g.fillText('READ ME', 20, 60);
-      g.font = `28px ${SANS}`; g.fillText('hidden . files', 20, 120); g.fillText('— the admin', 20, 170);
+      g.fillStyle = '#111';
+      this.escProps.label.forEach((l, i) => { g.font = i === 0 ? `600 40px ${SANS}` : `28px ${SANS}`; g.fillText(l, 20, 60 + i * 55); });
     }, 'esc:label', 'act.esc.label', 512, 0.4);
     this.station(-8.5, 25.3, Math.PI, [painters.logs('vault — guest@vault')], 'esc:terminal', 'act.esc.terminal', 0.5);
     this.intercom(-11.84, 25.1, E, 2);
@@ -661,13 +669,14 @@ export class World {
       this.breakers.set(id, light); this.breakerLevers.set(id, lever);
       this.interactables.push({ id: 'esc:breaker:' + id, object: g, actionKey: 'act.esc.breaker' });
     });
-    [['RACK-A', '03:07:44'], ['RACK-B', '03:12:09'], ['RACK-C', '03:01:52']].forEach(([name, time], i) => {
+    [0, 1, 2].forEach((i) => {
       const scr = this.screen(640, 360, (g, w, h, t) => {
+        const C = this.escProps.crash[i];
         g.fillStyle = '#12060a'; g.fillRect(0, 0, w, h);
         g.fillStyle = Math.floor(t * 1.5) % 2 ? '#ff5a4a' : '#a8322a'; g.fillRect(0, 0, w, 44);
-        g.fillStyle = '#fff'; g.font = `600 26px ${SANS}`; g.textBaseline = 'middle'; g.fillText(`${name} — POWER LOST`, 16, 22);
+        g.fillStyle = '#fff'; g.font = `600 26px ${SANS}`; g.textBaseline = 'middle'; g.fillText(C.title, 16, 22);
         g.fillStyle = '#ffb4a8'; g.font = `24px "JetBrains Mono", monospace`;
-        g.fillText(`kernel: PSU failure`, 16, 110); g.fillText(`time:   ${time}`, 16, 160); g.fillText(`status: OFFLINE`, 16, 210);
+        C.lines.forEach((l, k) => g.fillText(l, 16, 110 + k * 50));
       }, 0.6);
       const ws = wallScreen(this.mats, scr, 1.1, 0.62);
       ws.position.set(-2.18, 2.1, 27.6 + i * 1.4); ws.rotation.y = W;
@@ -678,7 +687,7 @@ export class World {
       const grd = g.createLinearGradient(0, 0, w, h); grd.addColorStop(0, '#b08d57'); grd.addColorStop(1, '#7a5f35');
       g.fillStyle = grd; g.fillRect(0, 0, w, h);
       g.fillStyle = '#2b1f0e'; g.font = `italic 600 30px Georgia, serif`; g.textAlign = 'center'; g.textBaseline = 'middle';
-      g.fillText('“Bring them back in the order they fell.”', w / 2, h / 2);
+      g.fillText(this.escProps.plaque, w / 2, h / 2);
     }, 'esc:plaque', 'act.esc.plaque', 1024, 0.15);
     this.intercom(-2.16, 31.2, W, 3);
 
@@ -697,6 +706,139 @@ export class World {
     for (const id of ['esc-b', 'esc-c', 'esc-d']) this.setDoorUnlocked(id, false);
     this.setDoorUnlocked('esc-a', true);
     for (const id of ['A', 'B', 'C']) this.setBreaker(id, false);
+  }
+
+
+  // ---------- receptionist robot, red alert console, escape kiosk ----------
+
+  private robot!: { root: THREE.Group; head: THREE.Group; arm: THREE.Group; face: ScreenTexture };
+  private talkUntil = 0;
+  private now = 0;
+  readonly robotPos = new THREE.Vector3(1.2, 0, -6.8);
+  private alarm = false;
+  private lobbyLights: THREE.PointLight[] = [];
+  private kioskScreen!: ScreenTexture;
+
+  private buildExtras() {
+    // NEXA robot behind the reception desk
+    const white = new THREE.MeshPhysicalMaterial({ color: 0xe9edf0, roughness: 0.25, metalness: 0.1, clearcoat: 0.8, clearcoatRoughness: 0.2 });
+    const dark = new THREE.MeshStandardMaterial({ color: 0x1b2026, roughness: 0.4, metalness: 0.6 });
+    const accent = new THREE.MeshStandardMaterial({ color: 0, emissive: 0x4fc3f7, emissiveIntensity: 2 });
+    const root = new THREE.Group();
+    const base = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.4, 0.12, 32), dark); base.position.y = 0.06; root.add(base);
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.36, 0.015, 8, 48), accent); ring.rotation.x = Math.PI / 2; ring.position.y = 0.13; root.add(ring);
+    const body = new THREE.Group(); body.position.y = 0.2; root.add(body);
+    const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.26, 0.5, 8, 24), white); torso.position.y = 0.55; torso.scale.set(1, 1, 0.8); body.add(torso);
+    const chest = new THREE.Mesh(new THREE.CircleGeometry(0.06, 24), accent); chest.position.set(0, 0.68, 0.205); body.add(chest);
+    const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.06, 0.1, 16), dark); neck.position.y = 1.07; body.add(neck);
+    const head = new THREE.Group(); head.position.y = 1.3; body.add(head);
+    head.add(new THREE.Mesh(new RoundedBoxGeometry(0.46, 0.34, 0.36, 4, 0.12), white));
+    const face = newScreen(256, 160, (g, w, h, t) => {
+      g.fillStyle = '#06131a'; g.fillRect(0, 0, w, h);
+      const blink = (t % 4.2) > 4.05;
+      const talking = this.now < this.talkUntil;
+      g.fillStyle = '#7fe3ff'; g.shadowColor = '#4fc3f7'; g.shadowBlur = 16;
+      for (const x of [w * 0.32, w * 0.68]) {
+        if (blink) g.fillRect(x - 22, h * 0.42, 44, 6);
+        else { g.beginPath(); g.ellipse(x, h * 0.42, 20, 24, 0, 0, Math.PI * 2); g.fill(); }
+      }
+      const open = talking ? 6 + Math.abs(Math.sin(t * 14)) * 12 : 3;
+      g.beginPath(); g.ellipse(w / 2, h * 0.78, talking ? 26 : 30, open, 0, 0, Math.PI * 2); g.fill();
+      g.shadowBlur = 0;
+    }, 0.06);
+    this.screens.push(face);
+    const visor = new THREE.Mesh(new THREE.PlaneGeometry(0.36, 0.23), new THREE.MeshStandardMaterial({ map: face.texture, emissive: 0xffffff, emissiveMap: face.texture, emissiveIntensity: 1, roughness: 0.15 }));
+    visor.position.set(0, 0, 0.181); head.add(visor);
+    const ant = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.14, 8), dark); ant.position.set(0.12, 0.23, 0); head.add(ant);
+    const tip = new THREE.Mesh(new THREE.SphereGeometry(0.025, 12, 8), accent); tip.position.set(0.12, 0.31, 0); head.add(tip);
+    const mkArm = (sx: number) => {
+      const a = new THREE.Group(); a.position.set(sx * 0.3, 0.88, 0);
+      const up = new THREE.Mesh(new THREE.CapsuleGeometry(0.055, 0.32, 6, 12), white); up.position.y = -0.2; a.add(up);
+      const hand = new THREE.Mesh(new THREE.SphereGeometry(0.065, 16, 12), dark); hand.position.y = -0.42; a.add(hand);
+      a.rotation.z = sx * 0.12;
+      body.add(a);
+      return a;
+    };
+    mkArm(-1);
+    const arm = mkArm(1);
+    root.position.copy(this.robotPos);
+    this.castAll(root);
+    this.root.add(root);
+    this.robot = { root, head, arm, face };
+    this.colliders.push(new THREE.Box3(new THREE.Vector3(0.75, 0, -7.25), new THREE.Vector3(1.65, 1.9, -6.35)));
+    this.interactables.push({ id: 'robot', object: root, actionKey: 'act.robot' });
+    this.light(1.2, 3.2, -6.1, 0x9fdcff, 3, 5);
+
+    // RED ALERT console
+    const con = new THREE.Group();
+    const ped = new THREE.Mesh(new RoundedBoxGeometry(0.7, 1.0, 0.5, 2, 0.04), this.mats.darkMetal); ped.position.y = 0.5; con.add(ped);
+    const top = new THREE.Mesh(new RoundedBoxGeometry(0.76, 0.06, 0.56, 2, 0.02), this.mats.steel); top.position.y = 1.03; top.rotation.x = -0.25; con.add(top);
+    const btn = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.1, 0.05, 32), new THREE.MeshStandardMaterial({ color: 0x400000, emissive: 0xff2a1a, emissiveIntensity: 2.2 }));
+    btn.position.set(0.15, 1.08, 0.02); btn.rotation.x = -0.25; con.add(btn);
+    const scr = this.screen(512, 256, (g, w, h, t) => {
+      g.fillStyle = '#1a0606'; g.fillRect(0, 0, w, h);
+      g.fillStyle = Math.floor(t * 1.2) % 2 ? '#ff4a3a' : '#c0392b'; g.font = `700 54px ${SANS}`; g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.fillText('RED ALERT', w / 2, h * 0.38);
+      g.fillStyle = '#ffb4a8'; g.font = `500 30px ${SANS}`; g.fillText('incident drill · 15:00', w / 2, h * 0.72);
+      g.textAlign = 'left';
+    }, 0.4);
+    const sm = new THREE.Mesh(new THREE.PlaneGeometry(0.3, 0.15), new THREE.MeshStandardMaterial({ map: scr.texture, emissive: 0xffffff, emissiveMap: scr.texture, emissiveIntensity: 0.9 }));
+    sm.position.set(-0.15, 1.075, 0.02); sm.rotation.x = -Math.PI / 2 - 0.25 + Math.PI / 2 - Math.PI / 2; sm.rotation.x = -0.25 - Math.PI / 2 + Math.PI / 2; sm.rotation.set(-1.32, 0, 0); con.add(sm);
+    con.position.set(-3.6, 0, -7.4);
+    this.castAll(con);
+    this.root.add(con);
+    this.colliders.push(new THREE.Box3(new THREE.Vector3(-3.98, 0, -7.7), new THREE.Vector3(-3.22, 1.2, -7.1)));
+    this.interactables.push({ id: 'ra:start', object: con, actionKey: 'act.ra' });
+    this.light(-3.6, 2.2, -7.0, 0xff4a3a, 1.5, 4);
+
+    // escape room selector kiosk next to the entrance
+    const k = new THREE.Group();
+    const post = new THREE.Mesh(new RoundedBoxGeometry(0.45, 1.05, 0.3, 2, 0.04), this.mats.darkMetal); post.position.y = 0.52; k.add(post);
+    this.kioskScreen = this.screen(512, 384, (g, w, h) => {
+      g.fillStyle = '#16100a'; g.fillRect(0, 0, w, h);
+      g.fillStyle = '#d9a441'; g.font = `600 40px ${SANS}`; g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.fillText('ESCAPE ROOM', w / 2, h * 0.3);
+      g.fillStyle = '#f2e6cf'; g.font = `500 46px ${SANS}`; g.fillText(this.escTitle, w / 2, h * 0.6);
+      g.fillStyle = '#a89070'; g.font = `26px ${SANS}`; g.fillText('press E to choose', w / 2, h * 0.84);
+      g.textAlign = 'left';
+    }, 0);
+    const km = monitor(this.mats, this.kioskScreen, 0.45);
+    km.position.set(0, 0.95, 0.04); km.rotation.x = -0.15; k.add(km);
+    k.position.set(-9.35, 0, 8.9); k.rotation.y = Math.PI * 0.85;
+    this.castAll(k);
+    this.root.add(k);
+    this.colliders.push(new THREE.Box3(new THREE.Vector3(-9.7, 0, 8.6), new THREE.Vector3(-9.0, 1.4, 9.2)));
+    this.interactables.push({ id: 'esc:select', object: k, actionKey: 'act.esc.select' });
+  }
+
+  setEscapeScenario(sc: EscapeScenario, title: string) {
+    this.escProps = sc.props;
+    this.escTitle = title;
+    for (const s of this.escScreens) s.paint(this.now);
+    this.kioskScreen.paint(this.now);
+  }
+
+  /** Robot starts talking (mouth animation + wave) for `ms`. */
+  robotTalk(ms: number) { this.talkUntil = this.now + ms / 1000; }
+
+  setAlarm(on: boolean) {
+    this.alarm = on;
+    if (!on) for (const l of this.lobbyLights) { l.color.setHex(0xf0f4ff); l.intensity = 14; }
+  }
+
+  private updateExtras(time: number, player: THREE.Vector3) {
+    this.now = time;
+    const r = this.robot;
+    const d = Math.hypot(player.x - this.robotPos.x, player.z - this.robotPos.z);
+    const target = d < 7 ? Math.max(-0.8, Math.min(0.8, Math.atan2(player.x - this.robotPos.x, player.z - this.robotPos.z))) : Math.sin(time * 0.3) * 0.3;
+    r.head.rotation.y += (target - r.head.rotation.y) * 0.08;
+    r.root.position.y = Math.sin(time * 1.6) * 0.015;
+    const talking = time < this.talkUntil;
+    r.arm.rotation.z += ((talking ? 2.4 + Math.sin(time * 9) * 0.35 : 0.12) - r.arm.rotation.z) * 0.12;
+    if (this.alarm) {
+      const pulse = 0.5 + 0.5 * Math.sin(time * 5);
+      for (const l of this.lobbyLights) { l.color.setRGB(1, 0.18 + 0.1 * pulse, 0.12); l.intensity = 6 + 10 * pulse; }
+    }
   }
 
   // ---------- doors ----------
@@ -879,6 +1021,7 @@ export class World {
     };
     for (const s of this.screens) s.update(time, visible);
     this.setZone(this.zoneAt(player));
+    this.updateExtras(time, player);
     this.leds.update(time);
     let opened: string | null = null;
     for (const d of this.doors) {

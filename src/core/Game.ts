@@ -10,7 +10,10 @@ import { CONFIG } from './config';
 import { loadSave, writeSave, exportSave, importSave, type SaveData, type Lang, type Quality, type Settings } from '../progression/save';
 import { computeXp, recordCompletion, rankFor, totalXp, evaluateAchievements } from '../progression/progress';
 import { missionById, missionsInLab, MISSIONS } from '../missions/registry';
-import { checkPin, flipBreaker, missionEsc2, POSTER, CRASH_LOG } from '../escape/logic';
+import { flipBreaker } from '../escape/logic';
+import { SCENARIOS, scenarioById, type EscapeScenario } from '../escape/scenarios';
+import { STAGES, TIME_LIMIT_MS } from '../redalert/stages';
+import { dailyMission, dateKey, recordDaily, DAILY_XP } from '../daily/daily';
 import { fmtTime } from '../ui/dom';
 import type { LabId } from '../missions/types';
 
@@ -39,6 +42,9 @@ export class Game {
   private fps = { frames: 0, acc: 0, value: 0 };
   private lastSave = 0;
   private esc = { active: false, start: 0, seq: [] as string[], run: null as MissionRun | null, lastObj: 0 };
+  private scenario: EscapeScenario = SCENARIOS[0];
+  private ra = { active: false, start: 0, stage: 0, run: null as MissionRun | null, lastObj: 0, lastBeep: 0 };
+  private robot = { near: false, idx: 0, greeted: false, last: 0 };
 
   constructor(private canvas: HTMLCanvasElement) {
     const loaded = loadSave();
@@ -144,6 +150,7 @@ export class Game {
     this.refreshWorldInfo();
     this.ui.setXp(this.save);
     this.updateObjective();
+    this.world.setEscapeScenario(this.scenario, t(`esc.${this.scenario.id}.title`));
     this.reopen?.();
   }
 
@@ -207,6 +214,7 @@ export class Game {
   }
 
   private updateObjective(big = false) {
+    if (this.ra.active) { this.ui.setObjective(t('ra.hud', { t: fmtTime(TIME_LIMIT_MS - (performance.now() - this.ra.start)), n: this.ra.stage + 1, task: this.raTask() }), big); return; }
     if (this.esc.active) { this.ui.setObjective(t('esc.objective', { t: fmtTime(performance.now() - this.esc.start) }), big); return; }
     const done = (id: string) => this.save.missions[id]?.completed;
     const next = MISSIONS.find((m) => !done(m.id));
@@ -295,6 +303,15 @@ export class Game {
     this.player.clearInput();
     if (it.id.startsWith('door:')) { this.sfx.denied(); return; }
     this.sfx.ui();
+    if (it.id === 'robot') { this.robotSay(); return; }
+    if (it.id === 'daily') { this.openDaily(); return; }
+    if (it.id === 'ra:start') { if (!this.ra.active) this.showRedAlertIntro(); return; }
+    if (it.id.startsWith('lab:') && this.ra.active) {
+      const lab = it.id.slice(4);
+      if (lab === STAGES[this.ra.stage].lab) { this.openRaStage(); return; }
+      this.ui.toast(t('ra.wrongLab', { lab: t('lab.' + STAGES[this.ra.stage].lab) }), 'warn');
+      return;
+    }
     if (it.id.startsWith('lab:')) { this.openLab(it.id.slice(4) as LabId); return; }
     if (it.id.startsWith('esc:')) { this.escInteract(it.id); return; }
     document.exitPointerLock();
@@ -319,7 +336,7 @@ export class Game {
   private escInteract(id: string) {
     if (id.startsWith('esc:breaker:')) {
       const b = id.slice(12);
-      const r = flipBreaker(this.esc.seq, b);
+      const r = flipBreaker(this.esc.seq, b, this.scenario.breakerOrder);
       if (r.result === 'already') return;
       this.esc.seq = r.seq;
       if (r.result === 'trip') { ['A', 'B', 'C'].forEach((x) => this.world.setBreaker(x, false)); this.sfx.error(); this.ui.toast(t('esc.breaker.trip'), 'bad'); return; }
@@ -334,26 +351,30 @@ export class Game {
     this.player.enabled = false;
     const back = () => this.enterGame();
     const info = (title: string, lines: string[], mono?: string) => this.view(() => this.ui.showInfo(title, lines, back, mono));
+    const sc = this.scenario;
     switch (id) {
-      case 'esc:note': return info(t('esc.note.title'), [t('esc.note.body')]);
-      case 'esc:poster': return info(t('esc.poster.title'), [], POSTER);
-      case 'esc:board': return info(t('esc.board.title'), [t('esc.board.body')]);
-      case 'esc:label': return info(t('esc.label.title'), [t('esc.label.body')]);
-      case 'esc:plaque': return info(t('esc.plaque.title'), [t('esc.plaque.body')]);
-      case 'esc:crash': return info(t('esc.crash.title'), [], CRASH_LOG.map(([r, tm]) => `${r}  kernel: PSU failure  power lost at ${tm}`).join('\n'));
+      case 'esc:select':
+        return this.view(() => this.ui.showEscapePicker(SCENARIOS.map((x) => ({ id: x.id, title: t(`esc.${x.id}.title`), desc: t(`esc.${x.id}.desc`), best: this.save.escapeTimes[x.id] ?? null, current: x.id === sc.id })),
+          (pick) => { this.setScenario(pick); this.ui.toast(t('esc.armed', { name: t(`esc.${pick}.title`) }), 'ok'); back(); }, back));
+      case 'esc:note': return info(t('esc.note.title'), [t(sc.keys.note)]);
+      case 'esc:poster': return info(t('esc.poster.title'), [], sc.mono.poster);
+      case 'esc:board': return info(t('esc.board.title'), [t(sc.keys.board)]);
+      case 'esc:label': return info(t('esc.label.title'), [t(sc.keys.label)]);
+      case 'esc:plaque': return info(t('esc.plaque.title'), [t(sc.keys.plaque)]);
+      case 'esc:crash': return info(t('esc.crash.title'), [], sc.mono.crash);
       case 'esc:keypad':
         return this.view(() => this.ui.showKeypad((code) => {
-          const ok = checkPin(code);
+          const ok = code.trim() === sc.pin;
           if (ok) { this.world.setDoorUnlocked('esc-b', true); this.sfx.objective(); this.ui.toast(t('esc.unlocked'), 'ok'); } else this.sfx.denied();
           return ok;
         }, back));
     }
-    if (id.startsWith('esc:warden:')) return info(t('esc.warden.title'), [t('esc.warden.' + id.slice(11))]);
+    if (id.startsWith('esc:warden:')) return info(t('esc.warden.title'), [t(sc.keys.warden + id.slice(11))]);
     back();
   }
 
   private openEscTerminal() {
-    if (!this.esc.run || this.esc.run.finished) { this.esc.run = new MissionRun(missionEsc2); this.esc.run.started = true; }
+    if (!this.esc.run || this.esc.run.finished) { this.esc.run = new MissionRun(this.scenario.terminal); this.esc.run.started = true; }
     this.state = 'mission';
     this.player.enabled = false;
     this.player.clearInput();
@@ -369,18 +390,148 @@ export class Game {
     e.runs++;
     e.completed = true;
     e.bestTimeMs = e.bestTimeMs === null ? time : Math.min(e.bestTimeMs, time);
-    if (!this.save.achievements.includes('escape')) { this.save.achievements.push('escape'); this.ui.toast(t('toast.achievement', { name: t('ach.escape') }), 'ok', 5000); }
+    const prev = this.save.escapeTimes[this.scenario.id];
+    this.save.escapeTimes[this.scenario.id] = prev ? Math.min(prev, time) : time;
+    this.give('escape');
+    if (SCENARIOS.every((x) => this.save.escapeTimes[x.id])) this.give('escape_all');
+    const best = this.save.escapeTimes[this.scenario.id];
     this.persist();
     this.sfx.complete();
     document.exitPointerLock();
     this.state = 'paused';
     this.player.enabled = false;
-    this.view(() => this.ui.showEscapeDone(time, e.bestTimeMs!, () => {
+    this.view(() => this.ui.showEscapeDone(time, best, () => {
       this.world.resetEscape();
       this.player.place(new THREE.Vector3(-8, 0, 8.3), 0);
       this.updateObjective();
       this.enterGame();
     }));
+  }
+
+  private give(a: string) {
+    if (this.save.achievements.includes(a)) return;
+    this.save.achievements.push(a);
+    this.ui.toast(t('toast.achievement', { name: t('ach.' + a) }), 'ok', 5000);
+  }
+
+  private setScenario(id: string) {
+    this.scenario = scenarioById(id);
+    this.esc.run = null;
+    this.world.setEscapeScenario(this.scenario, t(`esc.${this.scenario.id}.title`));
+  }
+
+  // ---------- NEXA ----------
+
+  private robotLine(): string {
+    const name = this.save.nickname || '…';
+    if (!this.robot.greeted) { this.robot.greeted = true; return t('robot.first', { name }); }
+    const next = MISSIONS.find((m) => !this.save.missions[m.id]?.completed);
+    const hour = new Date().getHours();
+    const solvedToday = this.save.daily.last === dateKey();
+    const lines = [
+      hour < 12 ? t('robot.morning', { name }) : hour >= 18 ? t('robot.evening', { name }) : t('robot.next', { name, mission: next ? t(`mission.${next.id}.title`) : '', lab: next ? t('lab.' + next.lab) : '' }),
+      next ? t('robot.next', { name, mission: t(`mission.${next.id}.title`), lab: t('lab.' + next.lab) }) : t('robot.allDone', { name }),
+      solvedToday ? t('robot.dailyDone', { n: this.save.daily.streak }) : t('robot.daily'),
+      t('robot.escape'), t('robot.redAlert'), t('robot.tip1'), t('robot.tip2'), t('robot.joke'),
+    ];
+    return lines[this.robot.idx++ % lines.length];
+  }
+
+  private robotSay() {
+    const text = this.robotLine();
+    this.ui.say(t('robot.name'), text, 6500);
+    this.world.robotTalk(Math.min(4500, 1200 + text.length * 45));
+    this.sfx.robot();
+    this.robot.last = performance.now();
+  }
+
+  private updateRobot() {
+    const p = this.player.position, r = this.world.robotPos;
+    const d = Math.hypot(p.x - r.x, p.z - r.z);
+    if (!this.robot.near && d < 4.2) { this.robot.near = true; if (performance.now() - this.robot.last > 4000) this.robotSay(); }
+    else if (this.robot.near && d > 6) this.robot.near = false;
+  }
+
+  // ---------- daily challenge ----------
+
+  private openDaily() {
+    const today = dateKey();
+    if (this.save.daily.last === today) { this.ui.toast(t('daily.already'), 'warn'); return; }
+    const run = new MissionRun(dailyMission(today));
+    run.started = true;
+    this.state = 'mission'; this.player.enabled = false; this.player.clearInput(); this.ui.showHud(false);
+    document.exitPointerLock();
+    this.mountMission(run);
+  }
+
+  private dailyDone() {
+    if (!recordDaily(this.save.daily, dateKey())) return;
+    this.save.bonusXp += DAILY_XP;
+    if (this.save.daily.streak >= 3) this.give('daily_3');
+    this.persist(); this.sfx.complete();
+    this.ui.toast(t('daily.done', { xp: DAILY_XP, n: this.save.daily.streak }), 'ok', 5000);
+    this.ui.setXp(this.save); this.refreshWorldInfo();
+  }
+
+  // ---------- RED ALERT ----------
+
+  private showRedAlertIntro() {
+    document.exitPointerLock();
+    this.state = 'paused'; this.player.enabled = false;
+    const back = () => this.enterGame();
+    const best = this.save.redAlert.bestTimeMs;
+    this.view(() => this.ui.showResult(t('ra.title'), t('ra.brief') + (best !== null ? '\n\n' + t('ra.best', { t: fmtTime(best) }) : ''), t('common.back'), back,
+      { label: t('ra.start'), action: () => { this.startRedAlert(); back(); } }));
+  }
+
+  private startRedAlert() {
+    this.ra = { active: true, start: performance.now(), stage: 0, run: null, lastObj: 0, lastBeep: 0 };
+    this.save.redAlert.runs++;
+    this.world.setAlarm(true);
+    this.sfx.alarm();
+  }
+
+  private raTask() { return t('ra.task.' + (this.ra.stage + 1)); }
+
+  private openRaStage() {
+    const def = STAGES[this.ra.stage];
+    if (!this.ra.run || this.ra.run.def.id !== def.id || this.ra.run.finished) { this.ra.run = new MissionRun(def); this.ra.run.started = true; }
+    this.state = 'mission'; this.player.enabled = false; this.player.clearInput(); this.ui.showHud(false);
+    document.exitPointerLock();
+    this.mountMission(this.ra.run);
+  }
+
+  private raStageDone() {
+    this.ra.stage++;
+    this.ra.run = null;
+    if (this.ra.stage < STAGES.length) { this.sfx.objective(); this.ui.toast(t('ra.stageDone', { n: this.ra.stage, task: this.raTask() }), 'ok', 5000); return; }
+    const time = performance.now() - this.ra.start;
+    this.ra.active = false;
+    this.world.setAlarm(false);
+    const r = this.save.redAlert;
+    r.completed = true; r.bestTimeMs = r.bestTimeMs === null ? time : Math.min(r.bestTimeMs, time);
+    this.give('red_alert');
+    this.persist(); this.sfx.complete();
+    document.exitPointerLock();
+    this.state = 'paused'; this.player.enabled = false;
+    this.view(() => this.ui.showResult(t('ra.win.title'), t('ra.win.body', { t: fmtTime(time) }) + '\n' + t('ra.best', { t: fmtTime(r.bestTimeMs!) }), t('ra.close'), () => this.enterGame()));
+  }
+
+  private updateRedAlert(time: number) {
+    if (!this.ra.active) return;
+    const left = TIME_LIMIT_MS - (performance.now() - this.ra.start);
+    if (left <= 0) {
+      this.ra.active = false;
+      this.world.setAlarm(false);
+      if (this.missionUI) { this.missionUI.destroy(); this.missionUI = null; this.ui.closeModal(); }
+      this.persist(); this.sfx.error();
+      document.exitPointerLock();
+      this.state = 'paused'; this.player.enabled = false;
+      this.view(() => this.ui.showResult(t('ra.fail.title'), t('ra.fail.body'), t('ra.close'), () => this.enterGame()));
+      return;
+    }
+    if (time - this.ra.lastBeep > 3) { this.ra.lastBeep = time; this.sfx.alarm(); }
+    if (this.state === 'playing' && time - this.ra.lastObj > 0.5) { this.ra.lastObj = time; this.ui.setObjective(t('ra.hud', { t: fmtTime(left), n: this.ra.stage + 1, task: this.raTask() })); }
   }
 
   private updateEscape(time: number) {
@@ -435,7 +586,9 @@ export class Game {
       onHint: () => { this.save.stats.hintsUsed++; this.persist(); },
       onLeave: () => this.closeMission(),
       onComplete: (timeMs, hints) => {
-        if (run.def.id === 'esc2') { this.closeMission(); this.world.setDoorUnlocked('esc-c', true); this.sfx.objective(); this.ui.toast(t('esc.unlocked'), 'ok'); return; }
+        if (run.def.id.startsWith('ra')) { this.closeMission(); this.raStageDone(); return; }
+        if (run.def.id === 'daily') { this.closeMission(); this.dailyDone(); return; }
+        if (run.def.id.startsWith('esc2')) { this.closeMission(); this.world.setDoorUnlocked('esc-c', true); this.sfx.objective(); this.ui.toast(t('esc.unlocked'), 'ok'); return; }
         this.completeMission(run, timeMs, hints);
       },
     });
@@ -482,8 +635,9 @@ export class Game {
       this.camera.lookAt(0, 2.3, -9);
     } else {
       this.player.update(this.state === 'playing' ? dt : 0, this.world.colliders);
-      if (this.state === 'playing') { this.updatePrompt(); this.updateEscape(time); }
+      if (this.state === 'playing') { this.updatePrompt(); this.updateEscape(time); this.updateRobot(); }
       else if (this.target) { this.target = null; this.ui.setPrompt(null); }
+      this.updateRedAlert(time);
     }
     if (this.state === 'playing' || this.state === 'mission') this.save.stats.playTimeMs += dt * 1000;
 

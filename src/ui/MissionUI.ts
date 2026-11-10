@@ -208,7 +208,7 @@ export class MissionUI {
     const shown = Array.from({ length: this.run.hintsUsed }, (_, i) => h('div', { class: 'hint' }, richText(t(`mission.${def.id}.hint.${i + 1}`))));
     const btn = this.run.hintsUsed < def.hintCount
       ? h('button', { class: 'btn', onclick: () => { this.run.hintsUsed++; this.cb.onHint(); this.renderHints(); this.input?.focus(); } },
-          def.freeHints ? t('act.esc.warden') : t('mission.hintBtn', { n: this.run.hintsUsed + 1, total: def.hintCount, cost: HINT_COST }))
+          def.freeHints ? t(def.freeHints) : t('mission.hintBtn', { n: this.run.hintsUsed + 1, total: def.hintCount, cost: HINT_COST }))
       : h('div', { class: 'muted' }, t('mission.noHints'));
     this.hintBox.replaceChildren(...shown, btn);
   }

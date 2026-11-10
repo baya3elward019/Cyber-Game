@@ -28,6 +28,10 @@ export interface SaveData {
   achievements: string[];
   stats: { commands: number; hintsUsed: number; playTimeMs: number };
   escape: { completed: boolean; bestTimeMs: number | null; runs: number };
+  escapeTimes: Record<string, number>;
+  redAlert: { completed: boolean; bestTimeMs: number | null; runs: number };
+  daily: { last: string; streak: number; total: number };
+  bonusXp: number;
   settings: Settings;
 }
 
@@ -39,7 +43,8 @@ export const defaultSettings = (): Settings => ({
 
 export const newSave = (): SaveData => ({
   version: 1, nickname: '', lang: 'en', missions: {}, achievements: [],
-  stats: { commands: 0, hintsUsed: 0, playTimeMs: 0 }, escape: { completed: false, bestTimeMs: null, runs: 0 }, settings: defaultSettings(),
+  stats: { commands: 0, hintsUsed: 0, playTimeMs: 0 }, escape: { completed: false, bestTimeMs: null, runs: 0 }, escapeTimes: {},
+  redAlert: { completed: false, bestTimeMs: null, runs: 0 }, daily: { last: '', streak: 0, total: 0 }, bonusXp: 0, settings: defaultSettings(),
 });
 
 const num = (v: unknown, lo: number, hi: number, d: number) => (typeof v === 'number' && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : d);
@@ -82,6 +87,19 @@ export function validateSave(raw: unknown): SaveData | null {
       bestTimeMs: typeof r.escape?.bestTimeMs === 'number' ? num(r.escape.bestTimeMs, 0, 1e9, 0) : null,
       runs: num(r.escape?.runs, 0, 1e6, 0),
     },
+    escapeTimes: Object.fromEntries(Object.entries(r.escapeTimes && typeof r.escapeTimes === 'object' ? r.escapeTimes : {})
+      .filter(([k, v]) => /^[a-z]{1,12}$/.test(k) && typeof v === 'number' && Number.isFinite(v) && v > 0).map(([k, v]) => [k, v as number])),
+    redAlert: {
+      completed: bool(r.redAlert?.completed, false),
+      bestTimeMs: typeof r.redAlert?.bestTimeMs === 'number' ? num(r.redAlert.bestTimeMs, 0, 1e9, 0) : null,
+      runs: num(r.redAlert?.runs, 0, 1e6, 0),
+    },
+    daily: {
+      last: typeof r.daily?.last === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(r.daily.last) ? r.daily.last : '',
+      streak: num(r.daily?.streak, 0, 1e5, 0),
+      total: num(r.daily?.total, 0, 1e5, 0),
+    },
+    bonusXp: num(r.bonusXp, 0, 1e7, 0),
     settings: {
       quality: ['low', 'medium', 'high', 'ultra'].includes(s.quality) ? s.quality : d.quality,
       sensitivity: num(s.sensitivity, 0.2, 3, d.sensitivity),

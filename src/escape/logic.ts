@@ -20,16 +20,16 @@ export const checkPin = (code: string) => code.trim() === PIN;
 
 export type BreakerResult = 'on' | 'trip' | 'done' | 'already';
 /** Applies one breaker flip to the current sequence. */
-export function flipBreaker(seq: string[], id: string): { seq: string[]; result: BreakerResult } {
+export function flipBreaker(seq: string[], id: string, order: readonly string[] = BREAKER_ORDER): { seq: string[]; result: BreakerResult } {
   if (seq.includes(id)) return { seq, result: 'already' };
   const next = [...seq, id];
-  if (BREAKER_ORDER[seq.length] !== id) return { seq: [], result: 'trip' };
-  return { seq: next, result: next.length === BREAKER_ORDER.length ? 'done' : 'on' };
+  if (order[seq.length] !== id) return { seq: [], result: 'trip' };
+  return { seq: next, result: next.length === order.length ? 'done' : 'on' };
 }
 
 /** Room 2: the vault terminal. The door code is in a hidden, Base64-encoded file. */
 export const missionEsc2: MissionDef = {
-  id: 'esc2', lab: 'soc', order: 99, baseXp: 0, hintCount: 2, parTime: 0, freeHints: true,
+  id: 'esc2', lab: 'soc', order: 99, baseXp: 0, hintCount: 2, parTime: 0, freeHints: 'act.esc.warden',
   createSession() {
     let unlocked = false;
     return terminalMission({
